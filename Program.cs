@@ -16,6 +16,13 @@ builder.Services.AddSingleton<PasswordService>(_ =>
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddSingleton<AdService>();
 
+// Health & Security
+builder.Services.AddSingleton<HealthService>();
+builder.Services.AddSingleton<SecurityService>(_ => 
+    new SecurityService(builder.Configuration.GetSection("Security").Get<SecurityOptions>() ?? new SecurityOptions()));
+builder.Services.Configure<HealthOptions>(builder.Configuration.GetSection("Health"));
+builder.Services.Configure<AuditLogOptions>(builder.Configuration.GetSection("Audit"));
+
 // Windows (Negotiate) auth for /admin APIs
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 builder.Services.AddAuthorization(o =>
@@ -24,7 +31,7 @@ builder.Services.AddAuthorization(o =>
 });
 
 builder.Services.AddRouting();
-builder.Services.AddControllers(); // if you add controllers later
+builder.Services.AddControllers();
 
 var app = builder.Build();
 
@@ -34,6 +41,35 @@ app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// --- Simple session bootstrap (issues CSRF token + session cookie) ---
+app.MapGet("/api/session/bootstrap", (HttpContext ctx, SecurityService sec) =>
+{
+    // Ensure or renew session and return CSRF token and device fingerprint preview (last 8 chars)
+    var csrf = sec.GetCsrf(ctx);
+    return Results.Ok(new { ok = true, csrf, cookie = "set", fpTail = "…" + sec.EnsureSession(ctx).Fingerprint[^8..] });
+}).AllowAnonymous();
+
+// --- CSRF guard for unsafe admin API methods ---
+// We guard only authenticated admin routes and only for non-GET/HEAD/OPTIONS.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "";
+    var method = ctx.Request.Method?.ToUpperInvariant() ?? "GET";
+    bool isUnsafe = method is "POST" or "PUT" or "PATCH" or "DELETE";
+
+    if (isUnsafe && path.StartsWith("/api/admin/", StringComparison.OrdinalIgnoreCase))
+    {
+        var sec = ctx.RequestServices.GetRequiredService<SecurityService>();
+        if (!sec.ValidateCsrf(ctx))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { ok = false, message = "CSRF validation failed or session expired." });
+            return;
+        }
+    }
+    await next();
+});
 
 // Minimal helper to read JSON body
 async Task<T> ReadJson<T>(HttpContext ctx)
@@ -52,21 +88,21 @@ string RemoteIp(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?
 // ---------- Public endpoints ----------
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; }).AllowAnonymous();
 
-// Domains list for dropdowns (public; contains only names)
+// Domains list (for dropdowns)
 app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
 {
     var names = (ao.Value?.Domains ?? new()).Select(d => d.Name).ToArray();
     return Results.Ok(names);
 }).AllowAnonymous();
 
-// Self-service reset (anonymous)
+// Self-service reset
 app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
     try
     {
         var req = await ReadJson<SelfServiceResetRequest>(ctx);
 
-        // Optional password strength preview
+        // (Optional) password policy preview
         var (ok, problems) = pw.CheckStrength(req.NewPassword);
         if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
 
@@ -83,7 +119,22 @@ app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, Audi
 
 // ---------- Admin endpoints (Windows auth) ----------
 
-// List users (domain optional in querystring)
+// Health dashboard API
+app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, HttpContext ctx) =>
+{
+    try
+    {
+        var r = health.GetReport();
+        return Results.Ok(new { ok = true, report = r });
+    }
+    catch (Exception ex)
+    {
+        audit.Write(Caller(ctx), "health", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
+    }
+}).RequireAuthorization("AdminOnly");
+
+// Users list
 app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     try
@@ -131,7 +182,7 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
     }
 }).RequireAuthorization("AdminOnly");
 
-// Export PDF (regular account summary only)
+// Export PDF (regular only)
 app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -207,7 +258,7 @@ app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogS
     }
 }).RequireAuthorization("AdminOnly");
 
-// Reset password (returns new password)
+// Reset password
 app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -234,3 +285,4 @@ app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entrie
    .RequireAuthorization("AdminOnly");
 
 app.Run();
+// ---------- End of main code ----------
