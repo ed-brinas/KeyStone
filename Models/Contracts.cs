@@ -5,7 +5,7 @@ namespace ADWebManager.Models
         public string Name { get; set; } = "";
         public string LdapBaseDn { get; set; } = "";
         public string UserOuDn { get; set; } = "";
-        public string AdminOuDn { get; set; } = "";     // used for -a accounts
+        public string AdminOuDn { get; set; } = "";
         public string GroupsBaseDn { get; set; } = "";
         public string ServiceAccountUser { get; set; } = "";
         public string ServiceAccountPassword { get; set; } = "";
@@ -46,7 +46,8 @@ namespace ADWebManager.Models
         public bool Enabled { get; set; }
         public bool IsLocked { get; set; }
         public DateTime? ExpirationDate { get; set; }
-        public string InitialPassword { get; set; } = "";
+        public string InitialPassword { get; set; } = "";           // 12-char standard
+        public string? AdminInitialPassword { get; set; } = null;   // 8-char admin (when created)
         public string[] GroupsAdded { get; set; } = Array.Empty<string>();
     }
 }

@@ -81,7 +81,7 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
         !req.ExpirationDate.HasValue ||
         string.IsNullOrWhiteSpace(req.SamAccountName))
     {
-        return Results.BadRequest(new { error = "All fields are mandatory: Domain, FirstName, LastName, Birthdate, ExpirationDate, SamAccountName." });
+        return Results.BadRequest(new { error = "All fields are mandatory: Domain, FirstName, LastName, Date of Birth, ExpirationDate, Username." });
     }
 
     var caller = Caller(ctx);
@@ -92,7 +92,7 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
         {
             created = req.CreatePrivileged,
             sam = req.CreatePrivileged ? result.SamAccountName + "-a" : null,
-            password = req.CreatePrivileged ? result.InitialPassword : null
+            password = req.CreatePrivileged ? result.AdminInitialPassword : null
         };
 
         await audit.WriteAsync(new AuditEvent
@@ -140,7 +140,7 @@ app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, Audi
         !req.Birthdate.HasValue ||
         !req.ExpirationDate.HasValue)
     {
-        return Results.BadRequest(new { error = "All fields are mandatory: Domain, SamAccountName, FirstName, LastName, Birthdate, ExpirationDate." });
+        return Results.BadRequest(new { error = "All fields are mandatory: Domain, Username, FirstName, LastName, Date of Birth, ID Expiration Date." });
     }
 
     var caller = Caller(ctx);

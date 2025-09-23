@@ -19,21 +19,32 @@ namespace ADWebManager.Services
         public int PrivilegedAccountValidityDays { get; set; } = 30;
     }
 
-    public interface IPasswordGenerator { string Generate(); }
+    // Updated: separate generators for standard vs admin
+    public interface IPasswordGenerator
+    {
+        string GenerateStandard(); // 12 chars, letters+numbers+specials
+        string GenerateAdmin();    // 8 chars, letters+numbers only
+    }
 
     public sealed class DefaultPasswordGenerator : IPasswordGenerator
     {
-        private static readonly char[] Alphabet =
+        private static readonly char[] StandardAlphabet =
             "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*()-_=+[]{}".ToCharArray();
+        private static readonly char[] AdminAlphabet =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".ToCharArray();
 
-        public string Generate()
+        private static string Generate(int length, char[] alphabet)
         {
             using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
-            var buf = new byte[16]; rng.GetBytes(buf);
-            var sb = new StringBuilder(buf.Length);
-            for (int i = 0; i < buf.Length; i++) sb.Append(Alphabet[buf[i] % Alphabet.Length]);
+            var buf = new byte[length];
+            rng.GetBytes(buf);
+            var sb = new StringBuilder(length);
+            for (int i = 0; i < buf.Length; i++) sb.Append(alphabet[buf[i] % alphabet.Length]);
             return sb.ToString();
         }
+
+        public string GenerateStandard() => Generate(12, StandardAlphabet);
+        public string GenerateAdmin()    => Generate(8,  AdminAlphabet);
     }
 
     public class AdService
@@ -60,10 +71,14 @@ namespace ADWebManager.Services
 
             var sam = req.SamAccountName!.Trim();
             var display = ToSentenceCase($"{req.FirstName} {req.LastName}");
-            var initialPassword = _passwords.Generate();
 
+            // Generate passwords per policy
+            var standardPassword = _passwords.GenerateStandard();
+            string? adminPassword = null;
+
+            // Create STANDARD account (force change at next logon)
             var (userDn, userOu, up) = CreateAccountInternal(
-                d, sam, display, req, initialPassword,
+                d, sam, display, req, standardPassword,
                 isPrivileged: false,
                 expireAtLogon: true);
 
@@ -71,11 +86,14 @@ namespace ADWebManager.Services
             if (d.StandardGroups != null)
                 foreach (var g in d.StandardGroups) TryAddToGroup(d, sam, g, groupsAdded);
 
+            // Create ADMIN (-a) account if requested (no forced change; 30-day validity)
             if (req.CreatePrivileged)
             {
                 var adminSam = sam + "-a";
+                adminPassword = _passwords.GenerateAdmin();
+
                 CreateAccountInternal(
-                    d, adminSam, display, req, initialPassword,
+                    d, adminSam, display, req, adminPassword,
                     isPrivileged: true,
                     expireAtLogon: false);
 
@@ -99,7 +117,8 @@ namespace ADWebManager.Services
                 Enabled = true,
                 IsLocked = false,
                 ExpirationDate = req.ExpirationDate?.ToDateTime(new TimeOnly(0, 0)),
-                InitialPassword = initialPassword,
+                InitialPassword = standardPassword,       // 12-char
+                AdminInitialPassword = adminPassword,     // 8-char when -a created
                 GroupsAdded = groupsAdded.ToArray()
             };
         }
@@ -145,12 +164,16 @@ namespace ADWebManager.Services
             user.Save();
         }
 
+        // Updated: choose generator based on whether account is -a
         public string ResetPassword(string domain, string samAccountName, bool unlock)
         {
             var d = GetDomain(domain);
             using var ctx = AdminContext(d);
             var user = FindBySam(ctx, samAccountName) ?? throw new Exception("User not found.");
-            var newPass = _passwords.Generate();
+
+            var isAdmin = samAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase);
+            var newPass = isAdmin ? _passwords.GenerateAdmin() : _passwords.GenerateStandard();
+
             user.SetPassword(newPass);
             if (unlock) { try { user.UnlockAccount(); } catch { } user.Enabled = true; }
             user.Save();
