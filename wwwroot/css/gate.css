@@ -1,0 +1,81 @@
+:root {
+  --bg-dark: #050b12;
+  --glow: rgba(0, 153, 255, 0.35);
+  --panel: rgba(10, 20, 35, 0.7);
+  --accent: #00b3ff;
+}
+
+/* Fullscreen canvas background */
+#gate-matrix {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(ellipse at center, #06111d 0%, #040a12 60%, #02060b 100%);
+}
+
+/* Overlay gradient for depth */
+.gate-overlay-grad {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(0, 179, 255, 0.08), transparent 35%, rgba(0, 179, 255, 0.08));
+  pointer-events: none;
+}
+
+/* Subtle animated scanline glow */
+.gate-scan {
+  position: fixed;
+  left: 0; right: 0;
+  height: 160px; top: -160px;
+  z-index: 2;
+  background: radial-gradient(ellipse at center, var(--glow), transparent 70%);
+  filter: blur(20px);
+  animation: gate-scan 6s linear infinite;
+  pointer-events: none;
+  opacity: .35;
+}
+@keyframes gate-scan {
+  0% { top: -160px; }
+  100% { top: calc(100% + 160px); }
+}
+
+/* Splash (warning) as full-screen gate */
+#gate-splash {
+  position: fixed; inset: 0; z-index: 4; display: none;
+  background: linear-gradient(180deg, rgba(0, 10, 18, .90), rgba(0, 10, 18, .96));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+#gate-splash .gate-center {
+  min-height: 100%;
+  display: grid; place-items: center;
+  padding: 24px;
+}
+#gate-splash .gate-card {
+  background: var(--panel);
+  color: #e8f6ff;
+  border: 1px solid rgba(0, 179, 255, .25);
+  box-shadow: 0 0 30px rgba(0, 179, 255, .15), inset 0 0 30px rgba(0, 179, 255, .05);
+  border-radius: 16px;
+  max-width: 760px;
+  width: 100%;
+}
+#gate-splash h2, #gate-splash h5 { color: #dff4ff; }
+#gate-splash .gate-warning {
+  border-left: 4px solid #ffc107; padding-left: 12px; color: #ffe7a3;
+}
+.gate-btn-accent {
+  --bs-btn-color: #001018;
+  --bs-btn-bg: var(--accent);
+  --bs-btn-border-color: var(--accent);
+  --bs-btn-hover-bg: #00a0e6;
+  --bs-btn-hover-border-color: #00a0e6;
+  --bs-btn-active-bg: #0090cf;
+  --bs-btn-active-border-color: #0090cf;
+  --bs-btn-shadow: 0 0 0 0.25rem rgba(0,179,255,.25);
+}
+
+/* Body lock while gate is shown (prevents scroll jumps) */
+body.gate-locked {
+  overflow: hidden !important;
+}

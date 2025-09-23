@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/bootstrap.min.css" />
   <link rel="stylesheet" href="/css/bootstrap-icons.css" />
   <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/gate.css" />
 </head>
 <body class="bg-light">
   <nav class="navbar navbar-dark bg-primary mb-4">
@@ -79,6 +80,11 @@
             <div class="invalid-feedback">Expiration date is required.</div>
           </div>
           <div class="col-md-4">
+            <label class="form-label">Mobile Number</label>
+            <input id="c_mobile" type="tel" class="form-control" placeholder="+9665xxxxxxxx" required />
+            <div class="invalid-feedback">Mobile number is required.</div>
+          </div>
+          <div class="col-md-4">
             <label class="form-label">Username</label>
             <input id="c_sam" class="form-control" required />
             <div class="invalid-feedback">Username (sAMAccountName) is required.</div>
@@ -146,9 +152,16 @@
     </div></div>
   </div>
 
+  <!-- Scripts -->
   <script src="/js/jquery.min.js"></script>
   <script src="/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>
   <script src="/js/app.admin.js"></script>
+
+  <!-- Gate overlay -->
+  <script src="/js/app.gate.js"></script>
+  <script>
+    Gate.init({ rememberSession: true, scopeKey: '/admin' });
+  </script>
 </body>
 </html>

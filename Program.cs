@@ -1,93 +1,119 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using ADWebManager.Models;
+using ADWebManager.Services;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.Extensions.Options;
-using ADWebManager.Services;
-using ADWebManager.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Windows Auth (IIS/Negotiate) – adjust if you use a different scheme
+// ---------- Options / DI ----------
+builder.Services.Configure<AdOptions>(builder.Configuration.GetSection("Ad"));
+builder.Services.AddSingleton<AuditLogService>(_ =>
+    new AuditLogService(builder.Configuration.GetSection("Audit").Get<AuditLogOptions>() ?? new AuditLogOptions()));
+builder.Services.AddSingleton<PasswordService>(_ =>
+    new PasswordService(builder.Configuration.GetSection("PasswordPolicy").Get<PasswordPolicyOptions>() ?? new PasswordPolicyOptions()));
+builder.Services.AddSingleton<PdfService>();
+builder.Services.AddSingleton<AdService>();
+
+// Windows (Negotiate) auth for /admin APIs
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
-builder.Services.AddAuthorization(options =>
+builder.Services.AddAuthorization(o =>
 {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build();
+    o.AddPolicy("AdminOnly", policy => policy.RequireAuthenticatedUser());
 });
 
-// Options & Services
-builder.Services.Configure<AdOptions>(builder.Configuration.GetSection("AD"));
-builder.Services.Configure<AuditOptions>(builder.Configuration.GetSection("Audit"));
-
-builder.Services.AddSingleton<IPasswordGenerator, DefaultPasswordGenerator>();
-builder.Services.AddSingleton<AdService>();
-builder.Services.AddSingleton<AuditLogService>();
-builder.Services.AddSingleton<PdfService>();
-
 builder.Services.AddRouting();
-builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddControllers(); // if you add controllers later
 
 var app = builder.Build();
 
-// Audit log directory ensure
-app.Services.GetRequiredService<AuditLogService>().EnsureReady();
-
-// Static files
-var contentTypes = new FileExtensionContentTypeProvider();
-contentTypes.Mappings[".map"] = "application/json";
-app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
+// ---------- Static & Security ----------
+app.UseDefaultFiles();    // serve index.html by default
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Health
-app.MapGet("/healthz", () => Results.Ok(new { ok = true, time = DateTimeOffset.UtcNow })).AllowAnonymous();
-
-// UI redirects
-app.MapGet("/admin", ctx => { ctx.Response.Redirect("/admin/index.html"); return Task.CompletedTask; }).RequireAuthorization();
-app.MapGet("/selfservice", ctx => { ctx.Response.Redirect("/selfservice/index.html"); return Task.CompletedTask; }).AllowAnonymous();
-
-// Helper
-string Caller(HttpContext ctx) => ctx.User?.Identity?.Name ?? "anonymous";
-
-// Config for UI dropdowns
-app.MapGet("/api/config/domains", (IOptions<AdOptions> opts) =>
+// Minimal helper to read JSON body
+async Task<T> ReadJson<T>(HttpContext ctx)
 {
-    var names = opts.Value.Domains?.Select(d => d.Name).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray() ?? Array.Empty<string>();
+    var obj = await JsonSerializer.DeserializeAsync<T>(ctx.Request.Body, new JsonSerializerOptions
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    });
+    if (obj == null) throw new Exception("Invalid JSON.");
+    return obj;
+}
+string Caller(HttpContext ctx) => ctx.User?.Identity?.Name ?? "(anon)";
+string RemoteIp(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "(unknown)";
+
+// ---------- Public endpoints ----------
+app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; }).AllowAnonymous();
+
+// Domains list for dropdowns (public; contains only names)
+app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
+{
+    var names = (ao.Value?.Domains ?? new()).Select(d => d.Name).ToArray();
     return Results.Ok(names);
 }).AllowAnonymous();
 
-// ---------- Admin APIs ----------
-
-// Aggregate user list across all configured domains
-app.MapGet("/api/admin/users", (AdService ad, IOptions<AdOptions> opts) =>
+// Self-service reset (anonymous)
+app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
-    var rows = new List<UserRow>();
-    foreach (var d in opts.Value.Domains ?? Enumerable.Empty<DomainConfig>())
+    try
     {
-        try { rows.AddRange(ad.ListUsers(d.Name)); } catch { /* ignore domain errors */ }
-    }
-    return Results.Ok(rows);
-}).RequireAuthorization();
+        var req = await ReadJson<SelfServiceResetRequest>(ctx);
 
-// Create user – returns JSON for modal (no PDF here)
-app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit, CreateUserRequest req) =>
+        // Optional password strength preview
+        var (ok, problems) = pw.CheckStrength(req.NewPassword);
+        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
+
+        await ad.SelfServiceResetPasswordAsync(req);
+        audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
+        return Results.Ok(new { ok = true });
+    }
+    catch (Exception ex)
+    {
+        audit.Write("(selfservice)", "reset", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
+    }
+}).AllowAnonymous();
+
+// ---------- Admin endpoints (Windows auth) ----------
+
+// List users (domain optional in querystring)
+app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
-    if (string.IsNullOrWhiteSpace(req.Domain) ||
-        string.IsNullOrWhiteSpace(req.FirstName) ||
-        string.IsNullOrWhiteSpace(req.LastName) ||
-        !req.Birthdate.HasValue ||
-        !req.ExpirationDate.HasValue ||
-        string.IsNullOrWhiteSpace(req.SamAccountName))
+    try
     {
-        return Results.BadRequest(new { error = "All fields are mandatory: Domain, FirstName, LastName, Date of Birth, ExpirationDate, Username." });
-    }
+        var domain = ctx.Request.Query["domain"].ToString();
+        var results = new List<UserRow>();
+        var domains = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdOptions>>().Value.Domains.Select(d => d.Name);
+        if (!string.IsNullOrWhiteSpace(domain))
+            results.AddRange(ad.ListUsers(domain));
+        else
+            foreach (var d in domains) results.AddRange(ad.ListUsers(d));
 
+        return Results.Ok(results);
+    }
+    catch (Exception ex)
+    {
+        audit.Write(Caller(ctx), "users", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
+    }
+}).RequireAuthorization("AdminOnly");
+
+// Create user
+app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
+{
     var caller = Caller(ctx);
     try
     {
+        var req = await ReadJson<CreateUserRequest>(ctx);
         var result = ad.CreateUser(req, caller);
+
         var admin = new
         {
             created = req.CreatePrivileged,
@@ -95,239 +121,116 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
             password = req.CreatePrivileged ? result.AdminInitialPassword : null
         };
 
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "CreateUser",
-            TargetUser = $"{result.Domain}\\{result.SamAccountName}",
-            Outcome = "Success (JSON returned)"
-        });
-
+        audit.Write(caller, "create", $"{result.Domain}\\{result.SamAccountName}", true, $"priv={req.CreatePrivileged}", RemoteIp(ctx));
         return Results.Ok(new { ok = true, result, admin });
     }
     catch (Exception ex)
     {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "CreateUser",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
+        audit.Write(caller, "create", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
-// Export PDF (regular user only; excludes admin creds)
-app.MapPost("/api/admin/create-user/export-pdf", (PdfService pdf, CreateUserResult payload) =>
+// Export PDF (regular account summary only)
+app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
 {
-    var pdfBytes = pdf.GenerateUserSummaryPdf(payload, watermark: "Confidential");
-    var fileName = $"UserSummary_{payload.Domain}_{payload.SamAccountName}_{DateTime.UtcNow:yyyyMMddHHmmss}.pdf";
-    return Results.File(pdfBytes, "application/pdf", fileName);
-}).RequireAuthorization();
+    var caller = Caller(ctx);
+    try
+    {
+        var r = await ReadJson<CreateUserResult>(ctx);
+        var bytes = pdf.CreateSummary(r);
+        return Results.File(bytes, "application/pdf", $"acct-{r.SamAccountName}.pdf");
+    }
+    catch (Exception ex)
+    {
+        audit.Write(caller, "export-pdf", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
+    }
+}).RequireAuthorization("AdminOnly");
 
 // Update user
-app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, AuditLogService audit, UpdateUserRequest req) =>
+app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
-    if (string.IsNullOrWhiteSpace(req.Domain) ||
-        string.IsNullOrWhiteSpace(req.SamAccountName) ||
-        string.IsNullOrWhiteSpace(req.FirstName) ||
-        string.IsNullOrWhiteSpace(req.LastName) ||
-        !req.Birthdate.HasValue ||
-        !req.ExpirationDate.HasValue)
-    {
-        return Results.BadRequest(new { error = "All fields are mandatory: Domain, Username, FirstName, LastName, Date of Birth, ID Expiration Date." });
-    }
-
     var caller = Caller(ctx);
     try
     {
+        var req = await ReadJson<UpdateUserRequest>(ctx);
         ad.UpdateUser(req, caller);
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "UpdateUser",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Success"
-        });
+        audit.Write(caller, "update", $"{req.Domain}\\{req.SamAccountName}", true, null, RemoteIp(ctx));
         return Results.Ok(new { ok = true });
     }
     catch (Exception ex)
     {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "UpdateUser",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
+        audit.Write(caller, "update", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
 // Unlock
-app.MapPost("/api/admin/unlock", async (HttpContext ctx, AdService ad, AuditLogService audit, UnlockRequest req) =>
+app.MapPost("/api/admin/unlock", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
     try
     {
-        ad.UnlockAccount(req.Domain, req.SamAccountName);
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "Unlock",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Success"
-        });
+        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+        var domain = doc.RootElement.GetProperty("domain").GetString()!;
+        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
+        ad.UnlockAccount(domain, sam);
+        audit.Write(caller, "unlock", $"{domain}\\{sam}", true, null, RemoteIp(ctx));
         return Results.Ok(new { ok = true });
     }
     catch (Exception ex)
     {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "Unlock",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
+        audit.Write(caller, "unlock", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
 // Enable/Disable
-app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogService audit, EnableDisableRequest req) =>
+app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
     try
     {
-        ad.SetEnabled(req.Domain, req.SamAccountName, req.Enable);
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = req.Enable ? "Enable" : "Disable",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Success"
-        });
+        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+        var domain = doc.RootElement.GetProperty("domain").GetString()!;
+        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
+        var enable = doc.RootElement.GetProperty("enable").GetBoolean();
+        ad.SetEnabled(domain, sam, enable);
+        audit.Write(caller, enable ? "enable" : "disable", $"{domain}\\{sam}", true, null, RemoteIp(ctx));
         return Results.Ok(new { ok = true });
     }
     catch (Exception ex)
     {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = req.Enable ? "Enable" : "Disable",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
+        audit.Write(caller, "enable/disable", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
-// Reset Password (returns generated pw; optionally unlocks)
-app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, ResetPasswordRequest req) =>
+// Reset password (returns new password)
+app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
     try
     {
-        var newPass = ad.ResetPassword(req.Domain, req.SamAccountName, req.Unlock);
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "ResetPassword",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Success"
-        });
-        return Results.Ok(new { password = newPass });
+        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+        var domain = doc.RootElement.GetProperty("domain").GetString()!;
+        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
+        var unlock = doc.RootElement.TryGetProperty("unlock", out var u) && u.GetBoolean();
+
+        var pw = ad.ResetPassword(domain, sam, unlock);
+        audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "unlock=" + unlock, RemoteIp(ctx));
+        return Results.Ok(new { ok = true, password = pw });
     }
     catch (Exception ex)
     {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = caller,
-            SourceIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            ActionType = "ResetPassword",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
+        audit.Write(caller, "reset-password", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization();
+}).RequireAuthorization("AdminOnly");
 
-// Logs
-app.MapGet("/api/admin/logs", (AuditLogService audit) =>
-{
-    var lines = audit.ReadTail(500);
-    return Results.Ok(new { entries = lines });
-}).RequireAuthorization();
-
-// ---------- Self-Service (public) ----------
-app.MapPost("/api/selfservice/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, SelfServiceResetRequest req) =>
-{
-    if (string.IsNullOrWhiteSpace(req.Domain) ||
-        string.IsNullOrWhiteSpace(req.SamAccountName) ||
-        string.IsNullOrWhiteSpace(req.Birthdate) ||
-        string.IsNullOrWhiteSpace(req.NewPassword))
-    {
-        return Results.BadRequest(new { error = "All fields are required." });
-    }
-    if (req.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase))
-    {
-        return Results.BadRequest(new { error = "Privileged (-a) accounts cannot use self-service. Contact the helpdesk." });
-    }
-
-    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    try
-    {
-        await ad.SelfServiceResetPasswordAsync(req);
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = "selfservice",
-            SourceIp = ip,
-            ActionType = "SelfServiceReset",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Success"
-        });
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        await audit.WriteAsync(new AuditEvent
-        {
-            TimestampUtc = DateTime.UtcNow,
-            Administrator = "selfservice",
-            SourceIp = ip,
-            ActionType = "SelfServiceReset",
-            TargetUser = $"{req.Domain}\\{req.SamAccountName}",
-            Outcome = "Failed: " + ex.Message
-        });
-        return Results.BadRequest(new { error = ex.Message });
-    }
-}).AllowAnonymous();
+// Logs tail
+app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() }))
+   .RequireAuthorization("AdminOnly");
 
 app.Run();
-
-// ---------- Request DTOs for endpoints ----------
-public record UnlockRequest(string Domain, string SamAccountName);
-public record EnableDisableRequest(string Domain, string SamAccountName, bool Enable);
-public record ResetPasswordRequest(string Domain, string SamAccountName, bool Unlock);
-public record CreateUserExportPdfRequest(CreateUserResult Result);

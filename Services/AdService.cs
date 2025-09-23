@@ -7,8 +7,8 @@ using System.Linq;
 using System.Security.Principal;
 using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Options;
 using ADWebManager.Models;
+using Microsoft.Extensions.Options;
 
 namespace ADWebManager.Services
 {
@@ -19,11 +19,10 @@ namespace ADWebManager.Services
         public int PrivilegedAccountValidityDays { get; set; } = 30;
     }
 
-    // Updated: separate generators for standard vs admin
     public interface IPasswordGenerator
     {
-        string GenerateStandard(); // 12 chars, letters+numbers+specials
-        string GenerateAdmin();    // 8 chars, letters+numbers only
+        string GenerateStandard(); // 12, letters+numbers+specials
+        string GenerateAdmin();    // 8, letters+numbers only
     }
 
     public sealed class DefaultPasswordGenerator : IPasswordGenerator
@@ -58,7 +57,7 @@ namespace ADWebManager.Services
             _passwords = passwords ?? new DefaultPasswordGenerator();
         }
 
-        // ---- Public surface ----
+        // ---------- Public ----------
         public CreateUserResult CreateUser(CreateUserRequest req, string caller)
         {
             var d = GetDomain(req.Domain);
@@ -72,13 +71,12 @@ namespace ADWebManager.Services
             var sam = req.SamAccountName!.Trim();
             var display = ToSentenceCase($"{req.FirstName} {req.LastName}");
 
-            // Generate passwords per policy
-            var standardPassword = _passwords.GenerateStandard();
-            string? adminPassword = null;
+            // Regular password (12 chars + specials)
+            var stdPass = _passwords.GenerateStandard();
 
-            // Create STANDARD account (force change at next logon)
-            var (userDn, userOu, up) = CreateAccountInternal(
-                d, sam, display, req, standardPassword,
+            // Create regular account (force change at next logon)
+            var (userDn, userOu, _) = CreateAccountInternal(
+                d, sam, display, req, stdPass,
                 isPrivileged: false,
                 expireAtLogon: true);
 
@@ -86,14 +84,15 @@ namespace ADWebManager.Services
             if (d.StandardGroups != null)
                 foreach (var g in d.StandardGroups) TryAddToGroup(d, sam, g, groupsAdded);
 
-            // Create ADMIN (-a) account if requested (no forced change; 30-day validity)
+            // Optional -a account
+            string? adminPass = null;
             if (req.CreatePrivileged)
             {
+                adminPass = _passwords.GenerateAdmin();
                 var adminSam = sam + "-a";
-                adminPassword = _passwords.GenerateAdmin();
 
                 CreateAccountInternal(
-                    d, adminSam, display, req, adminPassword,
+                    d, adminSam, display, req, adminPass,
                     isPrivileged: true,
                     expireAtLogon: false);
 
@@ -117,8 +116,10 @@ namespace ADWebManager.Services
                 Enabled = true,
                 IsLocked = false,
                 ExpirationDate = req.ExpirationDate?.ToDateTime(new TimeOnly(0, 0)),
-                InitialPassword = standardPassword,       // 12-char
-                AdminInitialPassword = adminPassword,     // 8-char when -a created
+                MobileNumber = req.MobileNumber,
+                InitialPassword = stdPass,
+                AdminInitialPassword = adminPass,
+                HasPrivileged = req.CreatePrivileged,
                 GroupsAdded = groupsAdded.ToArray()
             };
         }
@@ -134,6 +135,7 @@ namespace ADWebManager.Services
 
             using var ctx = AdminContext(d);
             var user = FindBySam(ctx, req.SamAccountName!) ?? throw new Exception("User not found.");
+
             user.GivenName = ToSentenceCase(req.FirstName);
             user.Surname = ToSentenceCase(req.LastName);
             user.DisplayName = $"{user.GivenName} {user.Surname}";
@@ -141,8 +143,13 @@ namespace ADWebManager.Services
             user.Save();
 
             using var de = (DirectoryEntry)user.GetUnderlyingObject();
+
             var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
             de.Properties[dobAttr].Value = req.Birthdate!.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+            if (!string.IsNullOrWhiteSpace(req.MobileNumber))
+                de.Properties["mobile"].Value = req.MobileNumber;
+
             de.CommitChanges();
         }
 
@@ -164,7 +171,6 @@ namespace ADWebManager.Services
             user.Save();
         }
 
-        // Updated: choose generator based on whether account is -a
         public string ResetPassword(string domain, string samAccountName, bool unlock)
         {
             var d = GetDomain(domain);
@@ -186,20 +192,32 @@ namespace ADWebManager.Services
             Require(!string.IsNullOrWhiteSpace(req.SamAccountName), "Username required.");
             Require(!string.IsNullOrWhiteSpace(req.Birthdate), "Birthdate required.");
             Require(!string.IsNullOrWhiteSpace(req.NewPassword), "New password required.");
+
             if (req.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase))
-                throw new Exception("Privileged (-a) accounts cannot use self-service. Contact the helpdesk.");
+                throw new Exception("Privileged (-a) accounts cannot use self-service.");
 
             var d = GetDomain(req.Domain);
             using var ctx = AdminContext(d);
             var user = FindBySam(ctx, req.SamAccountName!) ?? throw new Exception("Account not found.");
 
             using var de = (DirectoryEntry)user.GetUnderlyingObject();
-            var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
-            var storedVal = (de.Properties[dobAttr]?.Value as string)?.Trim();
-            var expected = req.Birthdate.Trim(); // yyyy-MM-dd
 
-            if (string.IsNullOrWhiteSpace(storedVal) || !string.Equals(storedVal, expected, StringComparison.Ordinal))
-                throw new Exception("Identity verification failed.");
+            // Verify DOB
+            var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
+            var storedDob = (de.Properties[dobAttr]?.Value as string)?.Trim();
+            var expectedDob = req.Birthdate.Trim();
+            if (string.IsNullOrWhiteSpace(storedDob) || !string.Equals(storedDob, expectedDob, StringComparison.Ordinal))
+                throw new Exception("Identity verification failed (DOB).");
+
+            // Verify last-4 of mobile
+            if (!string.IsNullOrWhiteSpace(req.MobileLast4))
+            {
+                var storedMobile = (de.Properties["mobile"]?.Value as string) ?? "";
+                var digits = new string(storedMobile.Where(char.IsDigit).ToArray());
+                var last4 = digits.Length >= 4 ? digits[^4..] : digits;
+                if (string.IsNullOrWhiteSpace(last4) || !string.Equals(last4, req.MobileLast4.Trim(), StringComparison.Ordinal))
+                    throw new Exception("Identity verification failed (mobile).");
+            }
 
             user.SetPassword(req.NewPassword);
             try { user.UnlockAccount(); } catch { }
@@ -265,7 +283,7 @@ namespace ADWebManager.Services
             return rows;
         }
 
-        // ---- Internals ----
+        // ---------- Internals ----------
         private (string dn, string ouUsed, UserPrincipal up) CreateAccountInternal(
             DomainConfig d, string sam, string display, CreateUserRequest req,
             string password, bool isPrivileged, bool expireAtLogon)
@@ -285,10 +303,9 @@ namespace ADWebManager.Services
                 up.AccountExpirationDate = req.ExpirationDate.Value.ToDateTime(new TimeOnly(0, 0));
             up.Save();
 
-            // Underlying entry
             using var entry = (DirectoryEntry)up.GetUnderlyingObject();
 
-            // Choose OU (AdminOuDn for -a if provided; else UserOuDn)
+            // Move to OU
             var targetOu = (!string.IsNullOrWhiteSpace(d.AdminOuDn) && isPrivileged) ? d.AdminOuDn : d.UserOuDn;
             if (!string.IsNullOrWhiteSpace(targetOu))
             {
@@ -303,14 +320,18 @@ namespace ADWebManager.Services
 
             // Attributes
             entry.Properties["displayName"].Value = display;
+
             if (req.Birthdate.HasValue)
             {
                 var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
                 entry.Properties[dobAttr].Value = req.Birthdate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             }
+
+            if (!string.IsNullOrWhiteSpace(req.MobileNumber))
+                entry.Properties["mobile"].Value = req.MobileNumber;
+
             entry.CommitChanges();
 
-            // Privileged vs standard handling
             if (isPrivileged)
             {
                 var days = Math.Max(1, _opts.PrivilegedAccountValidityDays);
@@ -403,26 +424,5 @@ namespace ADWebManager.Services
             foreach (var m in members) if (string.Equals(m?.ToString(), dn, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
         }
-    }
-
-    // Admin grid row
-    public class UserRow
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string DisplayName { get; set; } = "";
-        public bool Enabled { get; set; }
-        public bool IsLocked { get; set; }
-        public DateTime? ExpirationDate { get; set; }
-        public bool IsPrivileged { get; set; }
-    }
-
-    // Self-service request
-    public class SelfServiceResetRequest
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string Birthdate { get; set; } = ""; // yyyy-MM-dd
-        public string NewPassword { get; set; } = "";
     }
 }

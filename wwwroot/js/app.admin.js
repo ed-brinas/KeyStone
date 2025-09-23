@@ -47,7 +47,7 @@ async function populateDomains() {
   $('#u_domain').html(opts(domains, true)).on('change', loadUsers);
 }
 
-// Users
+// Users grid
 async function loadUsers(){
   const data = await api('/api/admin/users');
   const q = ($('#q').val() || '').toLowerCase();
@@ -150,6 +150,7 @@ function formDataOrInvalid() {
     lastName: $('#c_ln').val(),
     birthdate: $('#c_dob').val(),
     expirationDate: $('#c_exp').val(),
+    mobileNumber: $('#c_mobile').val(),   // ← include mobile
     samAccountName: $('#c_sam').val(),
     createPrivileged: $('#c_priv').is(':checked')
   };
@@ -166,6 +167,7 @@ function openCreatedSummaryModal(payload) {
   lines.push(`Domain            : ${r.domain}`);
   lines.push(`Username (SAM)    : ${r.samAccountName}`);
   lines.push(`Display Name      : ${r.displayName}`);
+  lines.push(`Mobile Number     : ${r.mobileNumber || '(not set)'}`); // ← show mobile
   lines.push(`OU                : ${r.ouCreatedIn}`);
   lines.push(`Enabled/Locked    : ${r.enabled ? "Enabled" : "Disabled"} / ${r.isLocked ? "Locked" : "Unlocked"}`);
   lines.push(`Expires           : ${r.expirationDate || "(none)"}`);
