@@ -2,26 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>KeyStone - an Active Directory Management Portal</title>
-  <meta name="author" content="Edward Brinas - September 2025" />
+  <title>AD Admin Portal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Local, offline styles -->
   <link rel="stylesheet" href="/css/bootstrap.min.css" />
   <link rel="stylesheet" href="/css/bootstrap-icons.css" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body class="bg-light">
-
   <nav class="navbar navbar-dark bg-primary mb-4">
     <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">KeyStone - an Active Directory Management Portal</span>
-      <span class="badge bg-warning text-dark">Access restricted; All actions are logged and monitored.</span>
+      <span class="navbar-brand mb-0 h1">AD Admin Portal</span>
+      <span class="badge bg-warning text-dark">Access restricted; all actions are audited.</span>
     </div>
   </nav>
 
   <main class="container">
-    <!-- Users Card -->
     <div class="card shadow-sm mb-4">
       <div class="card-header d-flex flex-wrap align-items-center gap-2">
         <h5 class="m-0 me-auto">Users</h5>
@@ -51,15 +46,11 @@
       </div>
     </div>
 
-    <!-- Create / Update Card -->
     <div class="card shadow-sm mb-4">
-      <div class="card-header">
-        <h5 class="m-0">Create / Update User</h5>
-      </div>
+      <div class="card-header"><h5 class="m-0">Create / Update User</h5></div>
       <div class="card-body">
         <div class="alert alert-info small" role="alert">
-          Newly created <strong>standard</strong> accounts must change their password at first logon.
-          This does <em>not</em> apply to <strong>admin (-a)</strong> accounts.
+          Newly created <strong>standard</strong> accounts must change their password at first logon. Not applied to <strong>-a</strong> accounts.
         </div>
         <form id="userForm" class="row g-3 needs-validation" novalidate>
           <div class="col-md-4">
@@ -78,24 +69,24 @@
             <div class="invalid-feedback">Last name is required.</div>
           </div>
           <div class="col-md-4">
-            <label class="form-label">Date of Birth</label>
+            <label class="form-label">Birthdate</label>
             <input id="c_dob" type="date" class="form-control" required />
-            <div class="invalid-feedback">Date of Birth is required.</div>
+            <div class="invalid-feedback">Birthdate is required.</div>
           </div>
           <div class="col-md-4">
-            <label class="form-label">ID Expiration</label>
+            <label class="form-label">Expiration</label>
             <input id="c_exp" type="date" class="form-control" required />
-            <div class="invalid-feedback">ID Expiration date is required.</div>
+            <div class="invalid-feedback">Expiration date is required.</div>
           </div>
           <div class="col-md-4">
             <label class="form-label">Username</label>
             <input id="c_sam" class="form-control" required />
-            <div class="invalid-feedback">Username is required.</div>
+            <div class="invalid-feedback">Username (sAMAccountName) is required.</div>
           </div>
           <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="c_priv" />
-              <label class="form-check-label" for="c_priv">Create a privileged account (-a)</label>
+              <label class="form-check-label" for="c_priv">Also create privileged (-a) account</label>
             </div>
           </div>
         </form>
@@ -107,7 +98,6 @@
       </div>
     </div>
 
-    <!-- Logs Card -->
     <div class="card shadow-sm mb-4">
       <div class="card-header d-flex align-items-center">
         <h5 class="m-0 me-auto">Logs</h5>
@@ -120,24 +110,20 @@
   </main>
 
   <footer class="mt-5 py-4 border-top text-center text-muted">
-    <div class="container">
-      <p class="mb-0">&copy; 2025 KeyStone. All rights reserved 2025. National Control Center Saudi Arabia. Powered by Ed.</p>
-    </div>
+    <div class="container"><p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p></div>
   </footer>
 
   <!-- Modals -->
-  <!-- Info Modal -->
   <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body" id="infoModalBody">Done.</div>
       <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
     </div></div>
   </div>
-  <!-- Confirm Modal -->
   <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body" id="confirmModalBody">Are you sure?</div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -145,34 +131,21 @@
       </div>
     </div></div>
   </div>
-  <!-- Created Summary Modal -->
   <div class="modal fade" id="createdModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Account(s) Created</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
+      <div class="modal-header"><h5 class="modal-title">Account(s) Created</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
-        <div class="alert alert-warning mb-3">
-          <strong>Keep this safe.</strong> The information below contains credentials.
-        </div>
+        <div class="alert alert-warning mb-3"><strong>Keep this safe.</strong> The information below contains credentials.</div>
         <pre id="createdModalPre" class="bg-light p-3 border rounded small mb-3" style="white-space:pre-wrap;"></pre>
         <div class="d-flex gap-2">
-          <button type="button" class="btn btn-outline-secondary" id="copyCreatedSummary">
-            <i class="bi bi-clipboard"></i> Copy
-          </button>
-          <button type="button" class="btn btn-primary" id="exportCreatedPdf">
-            <i class="bi bi-file-earmark-arrow-down"></i> Export to PDF
-          </button>
+          <button type="button" class="btn btn-outline-secondary" id="copyCreatedSummary"><i class="bi bi-clipboard"></i> Copy</button>
+          <button type="button" class="btn btn-primary" id="exportCreatedPdf"><i class="bi bi-file-earmark-arrow-down"></i> Export to PDF</button>
         </div>
-        <div class="form-text mt-2">
-          PDF export excludes admin credentials by design.
-        </div>
+        <div class="form-text mt-2">PDF export excludes admin credentials by design.</div>
       </div>
     </div></div>
   </div>
 
-  <!-- Scripts (local, offline) -->
   <script src="/js/jquery.min.js"></script>
   <script src="/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>

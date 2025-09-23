@@ -1,12 +1,13 @@
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Options;
 using ADWebManager.Services;
 using ADWebManager.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Windows Auth (Negotiate / IIS Integration)
+// Windows Auth (IIS/Negotiate) – adjust if you use a different scheme
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 builder.Services.AddAuthorization(options =>
 {
@@ -29,10 +30,10 @@ builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
 
-// Ensure audit directory exists
+// Audit log directory ensure
 app.Services.GetRequiredService<AuditLogService>().EnsureReady();
 
-// Static files (incl. .map)
+// Static files
 var contentTypes = new FileExtensionContentTypeProvider();
 contentTypes.Mappings[".map"] = "application/json";
 app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = contentTypes });
@@ -41,43 +42,38 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Health
-app.MapGet("/healthz", () => Results.Ok(new { ok = true, time = DateTimeOffset.UtcNow }))
-   .AllowAnonymous();
+app.MapGet("/healthz", () => Results.Ok(new { ok = true, time = DateTimeOffset.UtcNow })).AllowAnonymous();
 
-// UI Entrypoints
-app.MapGet("/admin", ctx => { ctx.Response.Redirect("/admin/index.html"); return Task.CompletedTask; })
-   .RequireAuthorization();
-
-app.MapGet("/selfservice", ctx => { ctx.Response.Redirect("/selfservice/index.html"); return Task.CompletedTask; })
-   .AllowAnonymous();
+// UI redirects
+app.MapGet("/admin", ctx => { ctx.Response.Redirect("/admin/index.html"); return Task.CompletedTask; }).RequireAuthorization();
+app.MapGet("/selfservice", ctx => { ctx.Response.Redirect("/selfservice/index.html"); return Task.CompletedTask; }).AllowAnonymous();
 
 // Helper
 string Caller(HttpContext ctx) => ctx.User?.Identity?.Name ?? "anonymous";
 
-// Config helper for UI domain dropdowns
-app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdOptions> opts) =>
+// Config for UI dropdowns
+app.MapGet("/api/config/domains", (IOptions<AdOptions> opts) =>
 {
     var names = opts.Value.Domains?.Select(d => d.Name).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray() ?? Array.Empty<string>();
     return Results.Ok(names);
-}).AllowAnonymous(); // used by self-service too
+}).AllowAnonymous();
 
-// -------- Admin APIs --------
+// ---------- Admin APIs ----------
 
-// Users list (aggregate all configured domains)
-app.MapGet("/api/admin/users", (AdService ad, Microsoft.Extensions.Options.IOptions<AdOptions> opts) =>
+// Aggregate user list across all configured domains
+app.MapGet("/api/admin/users", (AdService ad, IOptions<AdOptions> opts) =>
 {
     var rows = new List<UserRow>();
     foreach (var d in opts.Value.Domains ?? Enumerable.Empty<DomainConfig>())
     {
-        try { rows.AddRange(ad.ListUsers(d.Name)); } catch { /* ignore domain failures */ }
+        try { rows.AddRange(ad.ListUsers(d.Name)); } catch { /* ignore domain errors */ }
     }
     return Results.Ok(rows);
 }).RequireAuthorization();
 
-// Create user → returns JSON for the credentials modal (no PDF here)
+// Create user – returns JSON for modal (no PDF here)
 app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit, CreateUserRequest req) =>
 {
-    // Server-side guard: all mandatory
     if (string.IsNullOrWhiteSpace(req.Domain) ||
         string.IsNullOrWhiteSpace(req.FirstName) ||
         string.IsNullOrWhiteSpace(req.LastName) ||
@@ -92,8 +88,6 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
     try
     {
         var result = ad.CreateUser(req, caller);
-
-        // Admin '-a' shares the same initial password by design
         var admin = new
         {
             created = req.CreatePrivileged,
@@ -126,6 +120,14 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
         });
         return Results.BadRequest(new { error = ex.Message });
     }
+}).RequireAuthorization();
+
+// Export PDF (regular user only; excludes admin creds)
+app.MapPost("/api/admin/create-user/export-pdf", (PdfService pdf, CreateUserResult payload) =>
+{
+    var pdfBytes = pdf.GenerateUserSummaryPdf(payload, watermark: "Confidential");
+    var fileName = $"UserSummary_{payload.Domain}_{payload.SamAccountName}_{DateTime.UtcNow:yyyyMMddHHmmss}.pdf";
+    return Results.File(pdfBytes, "application/pdf", fileName);
 }).RequireAuthorization();
 
 // Update user
@@ -237,7 +239,7 @@ app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogS
     }
 }).RequireAuthorization();
 
-// Reset Password (returns generated password; also unlocks if requested)
+// Reset Password (returns generated pw; optionally unlocks)
 app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, ResetPasswordRequest req) =>
 {
     var caller = Caller(ctx);
@@ -270,14 +272,6 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
     }
 }).RequireAuthorization();
 
-// Export PDF (regular user only; excludes admin creds)
-app.MapPost("/api/admin/create-user/export-pdf", (PdfService pdf, CreateUserResult payload) =>
-{
-    var pdfBytes = pdf.GenerateUserSummaryPdf(payload, watermark: "Confidential");
-    var fileName = $"UserSummary_{payload.Domain}_{payload.SamAccountName}_{DateTime.UtcNow:yyyyMMddHHmmss}.pdf";
-    return Results.File(pdfBytes, "application/pdf", fileName);
-}).RequireAuthorization();
-
 // Logs
 app.MapGet("/api/admin/logs", (AuditLogService audit) =>
 {
@@ -285,9 +279,7 @@ app.MapGet("/api/admin/logs", (AuditLogService audit) =>
     return Results.Ok(new { entries = lines });
 }).RequireAuthorization();
 
-// -------- Self-Service --------
-
-// Anonymous; verifies DoB; blocks -a; changes password; unlocks & enables
+// ---------- Self-Service (public) ----------
 app.MapPost("/api/selfservice/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, SelfServiceResetRequest req) =>
 {
     if (string.IsNullOrWhiteSpace(req.Domain) ||
@@ -297,7 +289,6 @@ app.MapPost("/api/selfservice/reset-password", async (HttpContext ctx, AdService
     {
         return Results.BadRequest(new { error = "All fields are required." });
     }
-
     if (req.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase))
     {
         return Results.BadRequest(new { error = "Privileged (-a) accounts cannot use self-service. Contact the helpdesk." });
@@ -334,3 +325,9 @@ app.MapPost("/api/selfservice/reset-password", async (HttpContext ctx, AdService
 }).AllowAnonymous();
 
 app.Run();
+
+// ---------- Request DTOs for endpoints ----------
+public record UnlockRequest(string Domain, string SamAccountName);
+public record EnableDisableRequest(string Domain, string SamAccountName, bool Enable);
+public record ResetPasswordRequest(string Domain, string SamAccountName, bool Unlock);
+public record CreateUserExportPdfRequest(CreateUserResult Result);

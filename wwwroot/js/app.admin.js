@@ -1,16 +1,13 @@
-// === Styling tweaks for icon buttons (kept here to avoid inline <style>) ===
 (function injectStyles() {
   const css = `
     .icon-actions .btn-icon { padding: .25rem .35rem; line-height: 1; border: 0; background: transparent; }
     .icon-actions .btn-icon:focus { outline: none; box-shadow: none; }
     .text-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   `;
-  const s = document.createElement('style');
-  s.textContent = css;
-  document.head.appendChild(s);
+  const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
 })();
 
-// ---------- Modal helpers ----------
+// Modals
 function showInfo(title, html) {
   document.getElementById('infoModalTitle').textContent = title || 'Notice';
   document.getElementById('infoModalBody').innerHTML = html || '';
@@ -36,22 +33,21 @@ function initTooltips(scope=document) {
   list.forEach(el => new bootstrap.Tooltip(el, { container: 'body' }));
 }
 
-// ---------- Domains ----------
+// Domains
 async function populateDomains() {
   let domains = [];
-  try { domains = await api('/api/config/domains'); }
-  catch (e) { console.warn('Domain list endpoint not available. Using placeholder.'); }
-  const makeOptions = (list, includeAll=false) => {
-    if (!Array.isArray(list) || list.length === 0) return '<option value="" disabled selected>(no domains configured)</option>';
-    let opts = list.map(d => `<option>${d}</option>`).join('');
-    if (includeAll) opts = `<option value="">(all domains)</option>` + opts;
-    return opts;
+  try { domains = await api('/api/config/domains'); } catch {}
+  const opts = (list, all=false) => {
+    if (!Array.isArray(list) || !list.length) return '<option value="" disabled selected>(no domains configured)</option>';
+    let s = list.map(d => `<option>${d}</option>`).join('');
+    if (all) s = `<option value="">(all domains)</option>` + s;
+    return s;
   };
-  $('#c_domain').html(makeOptions(domains));
-  $('#u_domain').html(makeOptions(domains, true)).on('change', loadUsers);
+  $('#c_domain').html(opts(domains));
+  $('#u_domain').html(opts(domains, true)).on('change', loadUsers);
 }
 
-// ---------- Users table ----------
+// Users
 async function loadUsers(){
   const data = await api('/api/admin/users');
   const q = ($('#q').val() || '').toLowerCase();
@@ -145,7 +141,6 @@ async function loadUsers(){
   initTooltips(document);
 }
 
-// ---------- Form helpers ----------
 function formDataOrInvalid() {
   const form = document.getElementById('userForm');
   if (!form.checkValidity()) { form.classList.add('was-validated'); return null; }
@@ -160,9 +155,8 @@ function formDataOrInvalid() {
   };
 }
 
-// ---------- Created summary modal helpers ----------
+// Created summary modal
 let __lastCreatePayload = null;
-
 function openCreatedSummaryModal(payload) {
   __lastCreatePayload = payload;
   const r = payload.result;
@@ -196,32 +190,26 @@ async function copyCreatedSummaryToClipboard() {
     await navigator.clipboard.writeText(text);
     showInfo('Copied', 'The summary has been copied to your clipboard.');
   } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text; document.body.appendChild(ta); ta.select();
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
     try { document.execCommand('copy'); showInfo('Copied', 'The summary has been copied to your clipboard.'); }
     finally { document.body.removeChild(ta); }
   }
 }
-
 async function exportCreatedPdf() {
   if (!__lastCreatePayload || !__lastCreatePayload.result) return;
   await api('/api/admin/create-user/export-pdf', 'POST', __lastCreatePayload.result);
-  // /js/app.js should auto-download PDFs by content-type
 }
 
-// ---------- Create / Update ----------
+// Create / Update
 $('#create').click(async ()=>{
   const body = formDataOrInvalid();
   if (!body) return;
   const ok = await confirmAction('Create User', 'Proceed to create this user? A summary with credentials will be shown.');
   if (!ok) return;
-
-  // Backend returns JSON { ok, result, admin }
   const payload = await api('/api/admin/create-user','POST', body);
   openCreatedSummaryModal(payload);
   loadUsers();
 });
-
 $('#update').click(async ()=>{
   const body = formDataOrInvalid();
   if (!body) return;
@@ -231,19 +219,11 @@ $('#update').click(async ()=>{
   showInfo('Updated', `Account <code>${body.samAccountName}</code> has been updated.`);
   loadUsers();
 });
-
-$('#loadLogs').click(async ()=>{
-  const r = await api('/api/admin/logs');
-  $('#logs').text(r.entries.join('\n'));
-});
-
+$('#loadLogs').click(async ()=>{ const r = await api('/api/admin/logs'); $('#logs').text(r.entries.join('\n')); });
 $('#refresh').click(loadUsers);
 $('#q').on('input', loadUsers);
 document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
 document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
 
-// ---------- Init ----------
-(async () => {
-  await populateDomains();
-  await loadUsers();
-})();
+// Init
+(async () => { await populateDomains(); await loadUsers(); })();

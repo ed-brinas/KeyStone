@@ -1,20 +1,26 @@
-
-async function api(url, method="GET", body=null) {
-  const headers = {"Content-Type":"application/json"};
-  const opts = {method, headers, credentials:"include"};
-  if (body) opts.body = JSON.stringify(body);
+// Minimal fetch helper used by admin/selfservice pages.
+// Auto-downloads PDF responses.
+async function api(url, method = 'GET', body) {
+  const opts = { method, headers: {} };
+  if (body && method !== 'GET') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
   const res = await fetch(url, opts);
+  const ctype = res.headers.get('content-type') || '';
   if (!res.ok) {
-    let msg = await res.text();
-    try { const j = JSON.parse(msg); alert(j.error || msg); } catch(e){ alert(msg); }
+    let msg = 'Request failed';
+    try { const j = await res.json(); if (j && j.error) msg = j.error; } catch {}
     throw new Error(msg);
   }
-  if (res.headers.get("content-type")?.includes("application/pdf")) {
+  if (ctype.includes('application/pdf')) {
     const blob = await res.blob();
-    const urlb = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = urlb; a.download = "summary.pdf"; a.click();
-    return null;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'summary.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    return { ok: true };
   }
-  return await res.json();
+  if (ctype.includes('application/json')) return await res.json();
+  return await res.text();
 }

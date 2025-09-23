@@ -14,9 +14,9 @@ namespace ADWebManager.Services {
         public string Generate() {
             var rng = RandomNumberGenerator.Create();
             var chars = new List<char>();
-            if (_policy.IncludeUpper) chars.AddRange("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-            if (_policy.IncludeLower) chars.AddRange("abcdefghijklmnopqrstuvwxyz");
-            if (_policy.IncludeDigit) chars.AddRange("0123456789");
+            if (_policy.IncludeUpper) chars.AddRange("ABCDEFGHIJKLMNPQRSTUVWXYZ");
+            if (_policy.IncludeLower) chars.AddRange("abcdefghijklmnpqrstuvwxyz");
+            if (_policy.IncludeDigit) chars.AddRange("123456789");
             if (_policy.IncludeSpecial) chars.AddRange(Specials);
             if (chars.Count == 0) throw new InvalidOperationException("Password policy has no character sets.");
             var bytes = new byte[_policy.Length];

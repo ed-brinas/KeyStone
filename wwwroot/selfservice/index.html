@@ -4,29 +4,21 @@
   <meta charset="utf-8" />
   <title>Password Self-Service</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Local, offline styles -->
   <link rel="stylesheet" href="/css/bootstrap.min.css" />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body class="bg-light">
-
   <nav class="navbar navbar-dark bg-primary mb-4">
-    <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">Password Self-Service</span>
-    </div>
+    <div class="container-fluid"><span class="navbar-brand mb-0 h1">Password Self-Service</span></div>
   </nav>
 
   <main class="container" style="max-width: 680px;">
     <div class="card shadow-sm">
-      <div class="card-header">
-        <h5 class="m-0">Reset / Unlock Your Account</h5>
-      </div>
+      <div class="card-header"><h5 class="m-0">Reset / Unlock Your Account</h5></div>
       <div class="card-body">
         <div class="alert alert-info small" role="alert">
-          For security, you must verify your identity. Privileged accounts (usernames ending with <code>-a</code>) cannot use this self-service portal.
+          For security, verify your identity. Privileged accounts (usernames ending with <code>-a</code>) cannot use self-service.
         </div>
-
         <form id="ssForm" class="row g-3 needs-validation" novalidate>
           <div class="col-12">
             <label class="form-label">Domain</label>
@@ -34,7 +26,7 @@
             <div class="invalid-feedback">Please select your domain.</div>
           </div>
           <div class="col-12">
-            <label class="form-label">Username</label>
+            <label class="form-label">Username (sAMAccountName)</label>
             <input id="ss_user" class="form-control" required />
             <div class="invalid-feedback">Username is required.</div>
           </div>
@@ -46,7 +38,7 @@
           <div class="col-12">
             <label class="form-label">New Password</label>
             <input id="ss_new" type="password" class="form-control" required />
-            <div class="form-text">Use a strong password that meets your organization’s policy.</div>
+            <div class="form-text">Use a strong password that meets your policy.</div>
             <div class="invalid-feedback">New password is required.</div>
           </div>
           <div class="col-12">
@@ -55,7 +47,6 @@
             <div class="invalid-feedback">Please retype the password.</div>
           </div>
         </form>
-
         <div class="mt-3 d-flex gap-2">
           <button class="btn btn-primary" id="ss_submit">Change Password</button>
           <button class="btn btn-outline-secondary" id="ss_clear">Clear</button>
@@ -65,24 +56,20 @@
   </main>
 
   <footer class="mt-5 py-4 border-top text-center text-muted">
-    <div class="container">
-      <p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p>
-    </div>
+    <div class="container"><p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p></div>
   </footer>
 
   <!-- Modals -->
   <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body" id="infoModalBody">Done.</div>
       <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
     </div></div>
   </div>
   <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body" id="confirmModalBody">Proceed?</div>
       <div class="modal-footer">
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -91,7 +78,6 @@
     </div></div>
   </div>
 
-  <!-- Scripts (local, offline) -->
   <script src="/js/jquery.min.js"></script>
   <script src="/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>
