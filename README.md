@@ -1,7 +1,7 @@
 # README.md
 
 ## Overview
-**ADWebManager** is a web-based application for managing Active Directory (AD) accounts and providing self-service password reset for end-users.  
+**KeyStone AD Manager** is a web-based application for managing Active Directory (AD) accounts and providing self-service password reset for end-users.  
 
 It is designed to run entirely on-premises (no Internet dependencies) and is deployed on Microsoft IIS.
 
