@@ -1,150 +1,100 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>ADWebManager - Admin Portal</title>
-  <link rel="stylesheet" href="/css/style.css">
-  
+  <meta charset="utf-8" />
+  <title>Password Self-Service</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Local, offline styles -->
+  <link rel="stylesheet" href="/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="/css/style.css" />
 </head>
-<body>
-  <h1>Admin Portal</h1>
+<body class="bg-light">
 
-  <section>
-    <h2>Users</h2>
-    <input id="q" placeholder="Search..." oninput="loadUsers()">
-    <select id="u_domain" style="margin-left:8px;"></select>
-    <button onclick="loadUsers()">Refresh</button>
-    <table id="users" border="1" cellspacing="0" cellpadding="4">
-      <thead>
-        <tr><th>Domain</th><th>SAM</th><th>Name</th><th>Status</th><th>Expiration</th><th>Actions</th></tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </section>
+  <nav class="navbar navbar-dark bg-primary mb-4">
+    <div class="container-fluid">
+      <span class="navbar-brand mb-0 h1">Password Self-Service</span>
+    </div>
+  </nav>
 
-  <section style="margin-top:30px;">
-    <h2>Create User</h2>
-    <div>
-      <label>Domain</label>
-      <select id="c_domain"></select>
-    </div>
-    <div>
-      <label>SAM</label>
-      <input id="c_sam">
-    </div>
-    <div>
-      <label>Display Name</label>
-      <input id="c_display">
-    </div>
-    <div>
-      <label>OU</label>
-      <input id="c_ou">
-    </div>
-    <div>
-      <label>Groups (comma-separated)</label>
-      <input id="c_groups">
-    </div>
-    <button onclick="createUser()">Create</button>
-  </section>
+  <main class="container" style="max-width: 680px;">
+    <div class="card shadow-sm">
+      <div class="card-header">
+        <h5 class="m-0">Reset / Unlock Your Account</h5>
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small" role="alert">
+          For security, you must verify your identity. Privileged accounts (usernames ending with <code>-a</code>) cannot use this self-service portal.
+        </div>
 
-  <footer style="margin-top:40px;text-align:center;font-size:.9rem;color:#666;">
-    <hr/>
-    <p class="mb-0">&copy; 2025 KeyStone. All rights reserved. All actions are logged and monitored. Developed by Ed</p>
+        <form id="ssForm" class="row g-3 needs-validation" novalidate>
+          <div class="col-12">
+            <label class="form-label">Domain</label>
+            <select id="ss_domain" class="form-select" required></select>
+            <div class="invalid-feedback">Please select your domain.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Username</label>
+            <input id="ss_user" class="form-control" required />
+            <div class="invalid-feedback">Username is required.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Date of Birth</label>
+            <input id="ss_dob" type="date" class="form-control" required />
+            <div class="invalid-feedback">Date of birth is required.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">New Password</label>
+            <input id="ss_new" type="password" class="form-control" required />
+            <div class="form-text">Use a strong password that meets your organization’s policy.</div>
+            <div class="invalid-feedback">New password is required.</div>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Retype New Password</label>
+            <input id="ss_new2" type="password" class="form-control" required />
+            <div class="invalid-feedback">Please retype the password.</div>
+          </div>
+        </form>
+
+        <div class="mt-3 d-flex gap-2">
+          <button class="btn btn-primary" id="ss_submit">Change Password</button>
+          <button class="btn btn-outline-secondary" id="ss_clear">Clear</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="mt-5 py-4 border-top text-center text-muted">
+    <div class="container">
+      <p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p>
+    </div>
   </footer>
 
-<script src="/js/jquery.min.js"></script>
-  <script>
-    async function api(url, method="GET", body){
-      const res = await fetch(url, {
-        method,
-        headers: {"Content-Type":"application/json"},
-        body: body ? JSON.stringify(body) : undefined
-      });
-      if(!res.ok) throw new Error(await res.text());
-      return await res.json();
-    }
+  <!-- Modals -->
+  <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body" id="infoModalBody">Done.</div>
+      <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
+    </div></div>
+  </div>
+  <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body" id="confirmModalBody">Proceed?</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmModalOk">Yes</button>
+      </div>
+    </div></div>
+  </div>
 
-    // Populate domain dropdowns (Create User + filter)
-    async function populateDomains(){
-      let domains = [];
-      try {
-        domains = await api('/api/config/domains'); // expects string[]
-      } catch(e) {
-        console.warn("Domain list unavailable; using fallback");
-      }
-
-      const makeOptions = (list, includeAll=false) => {
-        if(!Array.isArray(list) || list.length===0){
-          return '<option value="" disabled selected>(no domains configured)</option>';
-        }
-        let opts = list.map(d=>`<option>${d}</option>`).join('');
-        if(includeAll){
-          opts = `<option value="">(all domains)</option>` + opts;
-        }
-        return opts;
-      };
-
-      // Create User dropdown
-      const c = document.getElementById("c_domain");
-      if(c) c.innerHTML = makeOptions(domains);
-
-      // Filter dropdown
-      const u = document.getElementById("u_domain");
-      if(u){
-        u.innerHTML = makeOptions(domains,true);
-        u.onchange = loadUsers;
-      }
-    }
-
-    async function loadUsers(){
-      const data = await api('/api/admin/users');
-      const q = ($('#q').val()||'').toLowerCase();
-      const domFilter = ($('#u_domain').val()||'');
-      const tbody = $('#users tbody').empty();
-      data
-        .filter(u => !domFilter || u.domain === domFilter)
-        .filter(u => (u.samAccountName||'').toLowerCase().includes(q))
-        .forEach(u=>{
-          const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
-          const tr = $('<tr>');
-          tr.append(`<td>${u.domain}</td>`);
-          tr.append(`<td>${u.samAccountName}</td>`);
-          tr.append(`<td>${u.displayName}</td>`);
-          tr.append(`<td>${status}</td>`);
-          tr.append(`<td>${u.expirationDate || ''}</td>`);
-          const btns = $('<td>');
-          btns.append($('<button class="btn">Unlock</button>').click(()=>api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers)));
-          btns.append(' ');
-          btns.append($('<button class="btn">Enable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers)));
-          btns.append(' ');
-          btns.append($('<button class="btn">Disable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers)));
-          btns.append(' ');
-          btns.append($('<button class="btn">Reset Password</button>').click(async()=>{
-            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
-            alert('New password: ' + r.password);
-          }));
-          tr.append(btns);
-          tbody.append(tr);
-        });
-    }
-
-    async function createUser(){
-      const body = {
-        domain: $('#c_domain').val(),
-        samAccountName: $('#c_sam').val(),
-        displayName: $('#c_display').val(),
-        ou: $('#c_ou').val(),
-        groups: $('#c_groups').val().split(',').map(x=>x.trim()).filter(x=>x)
-      };
-      const r = await api('/api/admin/create','POST',body);
-      alert('User created: ' + r.samAccountName);
-      loadUsers();
-    }
-
-    $(function(){
-      populateDomains();
-      loadUsers();
-    });
-  </script>  
+  <!-- Scripts (local, offline) -->
+  <script src="/js/jquery.min.js"></script>
+  <script src="/js/bootstrap.bundle.min.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/app.selfservice.js"></script>
 </body>
 </html>

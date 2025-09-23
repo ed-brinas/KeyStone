@@ -15,6 +15,7 @@ namespace ADWebManager.Services {
             content.AppendLine($"OU: {result.OuCreatedIn}");
             content.AppendLine($"Enabled: {result.Enabled}  Locked: {result.IsLocked}  Expires: {result.ExpirationDate}");
             content.AppendLine($"Groups: {string.Join(\", \", result.GroupsAdded)}");
+            content.AppendLine($"Must change password at next logon: {(result.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase) ? "No" : "Yes")}");
             content.AppendLine($"Initial Password: {result.InitialPassword}");
             var lines = content.ToString().Split('\n').Select(l => l.TrimEnd()).ToArray();
             return SimplePdf(lines, watermark);
