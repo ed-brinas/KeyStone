@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Password Self-Service</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <script src="/js/jquery.min.js"></script>
+  <script src="/js/app.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h1>Password Self-Service</h1>
+    <p>Use this page to change your own password. Privileged accounts (ending with "-a") are blocked.</p>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div><label>Domain</label><select id="s_domain"><option>lab.local</option><option>new.lab.local</option><option>old.lab.local</option></select></div>
+      <div><label>Username</label><input id="s_sam" /></div>
+      <div><label>Date of Birth</label><input id="s_dob" type="date" /></div>
+      <div><label>Current Password</label><input id="s_cur" type="password" /></div>
+      <div><label>New Password</label><input id="s_new" type="password" /></div>
+      <div><label>Confirm New Password</label><input id="s_new2" type="password" /></div>
+    </div>
+    <div style="margin-top:10px;">
+      <button class="btn primary" id="s_change">Change Password</button>
+    </div>
+  </div>
+
+<script>
+$('#s_change').click(async ()=>{
+  const body = {
+    domain: $('#s_domain').val(),
+    samAccountName: $('#s_sam').val(),
+    birthdate: $('#s_dob').val() || null,
+    currentPassword: $('#s_cur').val(),
+    newPassword: $('#s_new').val()
+  };
+  if ($('#s_new').val() !== $('#s_new2').val()) { alert('Passwords do not match.'); return; }
+  const res = await api('/api/selfservice/reset-password', 'POST', body);
+  alert('Password changed successfully.');
+  $('#s_cur').val(''); $('#s_new').val(''); $('#s_new2').val('');
+});
+</script>
+</body>
+</html>

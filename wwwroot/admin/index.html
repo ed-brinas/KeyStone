@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AD Admin Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <script src="/js/jquery.min.js"></script>
+  <script src="/js/app.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h1>AD Admin Portal</h1>
+    <p class="badge">Access restricted to authorized AD groups. Actions are fully audited.</p>
+  </div>
+
+  <div class="card">
+    <h2>Users</h2>
+    <button class="btn" id="refresh">Refresh</button>
+    <input type="text" id="q" placeholder="Search username..." />
+    <table class="table" id="users">
+      <thead><tr><th>Domain</th><th>Username</th><th>Display Name</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Create / Update User</h2>
+    <div class="grid">
+      <div><label>Domain</label><select id="c_domain"><option>lab.local</option><option>new.lab.local</option><option>old.lab.local</option></select></div>
+      <div><label>First Name</label><input id="c_fn" /></div>
+      <div><label>Last Name</label><input id="c_ln" /></div>
+      <div><label>Birthdate</label><input id="c_dob" type="date" /></div>
+      <div><label>Expiration</label><input id="c_exp" type="date" /></div>
+      <div><label>Username (optional)</label><input id="c_sam" /></div>
+      <div><label><input type="checkbox" id="c_priv" /> Create privileged (-a) account</label></div>
+    </div>
+    <div style="margin-top:10px;">
+      <button class="btn primary" id="create">Create User</button>
+      <button class="btn" id="update">Update User</button>
+    </div>
+    <p>Upon creation, a PDF "Confidential" summary will download automatically.</p>
+  </div>
+
+  <div class="card">
+    <h2>Logs</h2>
+    <button class="btn" id="loadLogs">Load Logs</button>
+    <pre id="logs" style="white-space:pre-wrap;"></pre>
+  </div>
+
+<script>
+async function loadUsers(){
+  const data = await api('/api/admin/users');
+  const q = $('#q').val()?.toLowerCase() || '';
+  const tbody = $('#users tbody').empty();
+  data.filter(u => u.samAccountName.toLowerCase().includes(q)).forEach(u=>{
+    const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
+    const tr = $('<tr>');
+    tr.append(`<td>${u.domain}</td>`);
+    tr.append(`<td>${u.samAccountName}</td>`);
+    tr.append(`<td>${u.displayName}</td>`);
+    tr.append(`<td>${status}</td>`);
+    tr.append(`<td>${u.expirationDate || ''}</td>`);
+    const btns = $('<td>');
+    btns.append($('<button class="btn">Unlock</button>').click(()=>api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers)));
+    btns.append(' ');
+    btns.append($('<button class="btn">Enable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers)));
+    btns.append(' ');
+    btns.append($('<button class="btn">Disable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers)));
+    btns.append(' ');
+    btns.append($('<button class="btn">Reset Password</button>').click(async()=>{
+      const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
+      alert('New password: ' + r.password);
+    }));
+    tr.append(btns);
+    tbody.append(tr);
+  });
+}
+$('#refresh').click(loadUsers);
+$('#q').on('input', loadUsers);
+
+$('#create').click(async ()=>{
+  const body = {
+    domain: $('#c_domain').val(),
+    firstName: $('#c_fn').val(),
+    lastName: $('#c_ln').val(),
+    birthdate: $('#c_dob').val() ? $('#c_dob').val() : null,
+    expirationDate: $('#c_exp').val() ? $('#c_exp').val() : null,
+    createPrivileged: $('#c_priv').is(':checked'),
+    samAccountName: $('#c_sam').val() || null,
+  };
+  await api('/api/admin/create-user','POST', body); // returns PDF
+});
+
+$('#update').click(async ()=>{
+  const body = {
+    domain: $('#c_domain').val(),
+    samAccountName: $('#c_sam').val(),
+    firstName: $('#c_fn').val(),
+    lastName: $('#c_ln').val(),
+    birthdate: $('#c_dob').val() ? $('#c_dob').val() : null,
+    expirationDate: $('#c_exp').val() ? $('#c_exp').val() : null,
+    createPrivileged: $('#c_priv').is(':checked')
+  };
+  if(!body.samAccountName){ alert('Username is required for update.'); return; }
+  await api('/api/admin/update-user','POST', body);
+  alert('Updated.');
+});
+
+$('#loadLogs').click(async ()=>{
+  const r = await api('/api/admin/logs');
+  $('#logs').text(r.entries.join('\n'));
+});
+
+loadUsers();
+</script>
+</body>
+</html>
