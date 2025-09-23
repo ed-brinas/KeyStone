@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>KeyStone - an Active Directory Management Portal</title>
+  <title>AD Admin Portal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <!-- Local, offline styles -->
@@ -16,17 +16,13 @@
   <script src="/js/app.js"></script>
 
   <style>
-    /* Compact icon actions */
     .icon-actions .btn-icon {
       padding: .25rem .35rem;
       line-height: 1;
       border: 0;
       background: transparent;
     }
-    .icon-actions .btn-icon:focus {
-      outline: none;
-      box-shadow: none;
-    }
+    .icon-actions .btn-icon:focus { outline: none; box-shadow: none; }
     .text-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
 </head>
@@ -34,7 +30,7 @@
 
   <nav class="navbar navbar-dark bg-primary mb-4">
     <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">KeyStone - an Active Directory Management Portal</span>
+      <span class="navbar-brand mb-0 h1">AD Admin Portal</span>
       <span class="badge bg-warning text-dark">Access restricted; all actions are audited.</span>
     </div>
   </nav>
@@ -130,50 +126,103 @@
 
   <footer class="mt-5 py-4 border-top text-center text-muted">
     <div class="container">
-      <p class="mb-0">&copy; 2025 KeyStone. All rights reserved. All actions are logged and monitored. Developed by Ed</p>
+      <p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p>
     </div>
   </footer>
 
+  <!-- Modals (shared) -->
+  <!-- Info Modal -->
+  <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="infoModalTitle">Notice</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="infoModalBody">Done.</div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Confirm Modal -->
+  <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="confirmModalTitle">Confirm</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="confirmModalBody">Are you sure?</div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger" id="confirmModalOk">Yes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
-// ---- Tooltips ----
+// ---------- Modal helpers ----------
+function showInfo(title, html) {
+  document.getElementById('infoModalTitle').textContent = title || 'Notice';
+  const body = document.getElementById('infoModalBody');
+  body.innerHTML = html || '';
+  new bootstrap.Modal(document.getElementById('infoModal')).show();
+}
+
+function confirmAction(title, html) {
+  return new Promise(resolve => {
+    document.getElementById('confirmModalTitle').textContent = title || 'Confirm';
+    const body = document.getElementById('confirmModalBody');
+    body.innerHTML = html || '';
+    const modalEl = document.getElementById('confirmModal');
+    const okBtn = document.getElementById('confirmModalOk');
+    const modal = new bootstrap.Modal(modalEl);
+
+    const cleanup = () => {
+      okBtn.removeEventListener('click', onOk);
+      modalEl.removeEventListener('hidden.bs.modal', onHide);
+    };
+    const onOk = () => { cleanup(); modal.hide(); resolve(true); };
+    const onHide = () => { cleanup(); resolve(false); };
+
+    okBtn.addEventListener('click', onOk);
+    modalEl.addEventListener('hidden.bs.modal', onHide, { once: true });
+    modal.show();
+  });
+}
+
 function initTooltips(scope=document) {
   const list = [].slice.call(scope.querySelectorAll('[data-bs-toggle="tooltip"]'));
   list.forEach(el => new bootstrap.Tooltip(el, { container: 'body' }));
 }
 
-// ---- Domain dropdowns (filter + create/update) ----
+// ---------- Domains ----------
 async function populateDomains() {
   let domains = [];
-  try {
-    domains = await api('/api/config/domains');
-  } catch (e) {
-    console.warn('Domain list endpoint not available. Using placeholder.');
-  }
+  try { domains = await api('/api/config/domains'); }
+  catch (e) { console.warn('Domain list endpoint not available. Using placeholder.'); }
 
   const makeOptions = (list, includeAll=false) => {
-    if (!Array.isArray(list) || list.length === 0) {
-      return '<option value="" disabled selected>(no domains configured)</option>';
-    }
+    if (!Array.isArray(list) || list.length === 0) return '<option value="" disabled selected>(no domains configured)</option>';
     let opts = list.map(d => `<option>${d}</option>`).join('');
     if (includeAll) opts = `<option value="">(all domains)</option>` + opts;
     return opts;
   };
 
-  // Create/Update domain select
   $('#c_domain').html(makeOptions(domains));
-
-  // Users filter domain select
   $('#u_domain').html(makeOptions(domains, true)).on('change', loadUsers);
 }
 
-// ---- Users table with icons & admin-equivalent logic ----
+// ---------- Users with icons & admin-equivalent logic ----------
 async function loadUsers(){
   const data = await api('/api/admin/users');
   const q = ($('#q').val() || '').toLowerCase();
   const domFilter = ($('#u_domain').val() || '');
   const tbody = $('#users tbody').empty();
 
-  // Build a set of base names that have a -a privileged account
   const adminBaseSet = new Set(
     data
       .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
@@ -187,61 +236,78 @@ async function loadUsers(){
       const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
       const isPriv = !!u.isPrivileged;
 
-      // With Admin Account? column badge
+      // With Admin Account?
       let adminBadgeHtml = '';
-      if (isPriv) {
-        adminBadgeHtml = '<span class="badge bg-secondary">—</span>';
-      } else {
-        const base = (u.samAccountName || '').toLowerCase();
-        const hasAdmin = adminBaseSet.has(base);
-        adminBadgeHtml = hasAdmin
-          ? '<span class="badge bg-success">✓</span>'
-          : '<span class="badge bg-danger">✗</span>';
-      }
+      const base = (u.samAccountName || '').toLowerCase();
+      const hasAdmin = !isPriv && adminBaseSet.has(base);
+      adminBadgeHtml = isPriv
+        ? '<span class="badge bg-secondary">—</span>'
+        : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
 
-      // Build icon action bar
+      // Actions (icons)
       const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
 
       // Unlock
       actions.append(
         $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
-          .click(() => api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers))
+          .click(async () => {
+            const ok = await confirmAction('Unlock Account', `Unlock <code>${u.samAccountName}</code> on <code>${u.domain}</code>?`);
+            if (!ok) return;
+            await api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName});
+            showInfo('Unlocked', `Account <code>${u.samAccountName}</code> was unlocked.`);
+            loadUsers();
+          })
       );
 
       // Enable
       actions.append(
         $('<button class="btn-icon text-success me-2" aria-label="Enable" data-bs-toggle="tooltip" title="Enable"><i class="bi bi-check-circle"></i></button>')
-          .click(() => api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers))
+          .click(async () => {
+            const ok = await confirmAction('Enable Account', `Enable <code>${u.samAccountName}</code>?`);
+            if (!ok) return;
+            await api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true});
+            showInfo('Enabled', `Account <code>${u.samAccountName}</code> is now enabled.`);
+            loadUsers();
+          })
       );
 
       // Disable
       actions.append(
         $('<button class="btn-icon text-warning me-2" aria-label="Disable" data-bs-toggle="tooltip" title="Disable"><i class="bi bi-slash-circle"></i></button>')
-          .click(() => api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers))
+          .click(async () => {
+            const ok = await confirmAction('Disable Account', `Disable <code>${u.samAccountName}</code>?`);
+            if (!ok) return;
+            await api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false});
+            showInfo('Disabled', `Account <code>${u.samAccountName}</code> is now disabled.`);
+            loadUsers();
+          })
       );
 
       // Reset Password
       actions.append(
         $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
           .click(async () => {
+            const ok = await confirmAction('Reset Password', `Reset password for <code>${u.samAccountName}</code>? This will also unlock the account.`);
+            if (!ok) return;
             const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
-            alert('New password: ' + r.password);
+            showInfo('Password Reset', `New password for <code>${u.samAccountName}</code>:<br><code>${r.password}</code>`);
+            loadUsers();
           })
       );
 
-      // Reset Admin Password (only for standard accounts that have a -a)
-      if (!isPriv) {
-        const base = (u.samAccountName || '').toLowerCase();
-        if (adminBaseSet.has(base)) {
-          const adminSam = `${u.samAccountName}-a`;
-          actions.append(
-            $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
-              .click(async () => {
-                const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
-                alert('Admin account new password: ' + r.password);
-              })
-          );
-        }
+      // Reset Admin Password (if -a exists for a standard account)
+      if (!isPriv && hasAdmin) {
+        const adminSam = `${u.samAccountName}-a`;
+        actions.append(
+          $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
+            .click(async () => {
+              const ok = await confirmAction('Reset Admin Password', `Reset password for admin account <code>${adminSam}</code>?`);
+              if (!ok) return;
+              const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
+              showInfo('Admin Password Reset', `New password for <code>${adminSam}</code>:<br><code>${r.password}</code>`);
+              loadUsers();
+            })
+        );
       }
 
       const tr = $('<tr>');
@@ -259,7 +325,7 @@ async function loadUsers(){
   initTooltips(document);
 }
 
-// ---- Create / Update actions (unchanged; server triggers PDF on create) ----
+// ---------- Create / Update (with modals) ----------
 $('#create').click(async ()=>{
   const body = {
     domain: $('#c_domain').val(),
@@ -270,7 +336,12 @@ $('#create').click(async ()=>{
     createPrivileged: $('#c_priv').is(':checked'),
     samAccountName: $('#c_sam').val() || null
   };
+  const ok = await confirmAction('Create User', 'Proceed to create this user? A PDF summary will download afterwards.');
+  if (!ok) return;
+  // The API returns a PDF (handled in /js/app.js to auto-download). We still show success.
   await api('/api/admin/create-user','POST', body);
+  showInfo('User Created', 'User created successfully. A PDF summary has been downloaded.');
+  loadUsers();
 });
 
 $('#update').click(async ()=>{
@@ -283,9 +354,15 @@ $('#update').click(async ()=>{
     expirationDate: $('#c_exp').val() || null,
     createPrivileged: $('#c_priv').is(':checked')
   };
-  if(!body.samAccountName){ alert('Username is required for update.'); return; }
+  if(!body.samAccountName){
+    showInfo('Missing Field', 'Username is required for update.');
+    return;
+  }
+  const ok = await confirmAction('Update User', `Update account <code>${body.samAccountName}</code>?`);
+  if (!ok) return;
   await api('/api/admin/update-user','POST', body);
-  alert('Updated.');
+  showInfo('Updated', `Account <code>${body.samAccountName}</code> has been updated.`);
+  loadUsers();
 });
 
 $('#loadLogs').click(async ()=>{
@@ -296,7 +373,7 @@ $('#loadLogs').click(async ()=>{
 $('#refresh').click(loadUsers);
 $('#q').on('input', loadUsers);
 
-// ---- Init ----
+// ---------- Init ----------
 (async () => {
   await populateDomains();
   await loadUsers();
