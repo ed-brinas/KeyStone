@@ -1,94 +1,276 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AD Admin Portal</title>
+  <title>KeyStone - an Active Directory Management Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Local, offline styles -->
+  <link rel="stylesheet" href="/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="/css/bootstrap-icons.css" />
   <link rel="stylesheet" href="/css/style.css" />
+
+  <!-- Local, offline scripts -->
   <script src="/js/jquery.min.js"></script>
+  <script src="/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>
+
+  <style>
+    /* Compact icon actions */
+    .icon-actions .btn-icon {
+      padding: .25rem .35rem;
+      line-height: 1;
+      border: 0;
+      background: transparent;
+    }
+    .icon-actions .btn-icon:focus {
+      outline: none;
+      box-shadow: none;
+    }
+    .text-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
 </head>
-<body>
-  <div class="card">
-    <h1>AD Admin Portal</h1>
-    <p class="badge">Access restricted to authorized AD groups. Actions are fully audited.</p>
-  </div>
+<body class="bg-light">
 
-  <div class="card">
-    <h2>Users</h2>
-    <button class="btn" id="refresh">Refresh</button>
-    <input type="text" id="q" placeholder="Search username..." />
-    <table class="table" id="users">
-      <thead><tr><th>Domain</th><th>Username</th><th>Display Name</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2>Create / Update User</h2>
-    <div class="grid">
-      <div><label>Domain</label><select id="c_domain"><option>lab.local</option><option>new.lab.local</option><option>old.lab.local</option></select></div>
-      <div><label>First Name</label><input id="c_fn" /></div>
-      <div><label>Last Name</label><input id="c_ln" /></div>
-      <div><label>Birthdate</label><input id="c_dob" type="date" /></div>
-      <div><label>Expiration</label><input id="c_exp" type="date" /></div>
-      <div><label>Username (optional)</label><input id="c_sam" /></div>
-      <div><label><input type="checkbox" id="c_priv" /> Create privileged (-a) account</label></div>
+  <nav class="navbar navbar-dark bg-primary mb-4">
+    <div class="container-fluid">
+      <span class="navbar-brand mb-0 h1">KeyStone - an Active Directory Management Portal</span>
+      <span class="badge bg-warning text-dark">Access restricted; all actions are audited.</span>
     </div>
-    <div style="margin-top:10px;">
-      <button class="btn primary" id="create">Create User</button>
-      <button class="btn" id="update">Update User</button>
-    </div>
-    <p>Upon creation, a PDF "Confidential" summary will download automatically.</p>
-  </div>
+  </nav>
 
-  <div class="card">
-    <h2>Logs</h2>
-    <button class="btn" id="loadLogs">Load Logs</button>
-    <pre id="logs" style="white-space:pre-wrap;"></pre>
-  </div>
+  <main class="container">
+    <!-- Users Card -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header d-flex flex-wrap align-items-center gap-2">
+        <h5 class="m-0 me-auto">Users</h5>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <select id="u_domain" class="form-select form-select-sm" style="min-width:220px;"></select>
+          <input id="q" type="text" class="form-control form-control-sm" placeholder="Search username…" />
+          <button class="btn btn-sm btn-outline-secondary" id="refresh">Refresh</button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0" id="users">
+            <thead class="table-light">
+              <tr>
+                <th>Domain</th>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Status</th>
+                <th>Expires</th>
+                <th>With Admin Account?</th>
+                <th class="text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create / Update Card -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header">
+        <h5 class="m-0">Create / Update User</h5>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Domain</label>
+            <select id="c_domain" class="form-select"></select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">First Name</label>
+            <input id="c_fn" class="form-control" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Last Name</label>
+            <input id="c_ln" class="form-control" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Birthdate</label>
+            <input id="c_dob" type="date" class="form-control" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Expiration</label>
+            <input id="c_exp" type="date" class="form-control" />
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Username (optional; auto if blank)</label>
+            <input id="c_sam" class="form-control" />
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="c_priv" />
+              <label class="form-check-label" for="c_priv">Create privileged (-a) account</label>
+            </div>
+          </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+          <button class="btn btn-primary" id="create">Create User</button>
+          <button class="btn btn-outline-secondary" id="update">Update User</button>
+        </div>
+        <p class="text-muted mt-2 mb-0">After creation, a watermarked PDF summary downloads automatically.</p>
+      </div>
+    </div>
+
+    <!-- Logs Card -->
+    <div class="card shadow-sm mb-4">
+      <div class="card-header d-flex align-items-center">
+        <h5 class="m-0 me-auto">Logs</h5>
+        <button class="btn btn-sm btn-outline-secondary" id="loadLogs">Load Logs</button>
+      </div>
+      <div class="card-body">
+        <pre id="logs" class="small mb-0" style="white-space:pre-wrap;"></pre>
+      </div>
+    </div>
+  </main>
+
+  <footer class="mt-5 py-4 border-top text-center text-muted">
+    <div class="container">
+      <p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p>
+    </div>
+  </footer>
 
 <script>
+// ---- Tooltips ----
+function initTooltips(scope=document) {
+  const list = [].slice.call(scope.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  list.forEach(el => new bootstrap.Tooltip(el, { container: 'body' }));
+}
+
+// ---- Domain dropdowns (filter + create/update) ----
+async function populateDomains() {
+  let domains = [];
+  try {
+    domains = await api('/api/config/domains');
+  } catch (e) {
+    console.warn('Domain list endpoint not available. Using placeholder.');
+  }
+
+  const makeOptions = (list, includeAll=false) => {
+    if (!Array.isArray(list) || list.length === 0) {
+      return '<option value="" disabled selected>(no domains configured)</option>';
+    }
+    let opts = list.map(d => `<option>${d}</option>`).join('');
+    if (includeAll) opts = `<option value="">(all domains)</option>` + opts;
+    return opts;
+  };
+
+  // Create/Update domain select
+  $('#c_domain').html(makeOptions(domains));
+
+  // Users filter domain select
+  $('#u_domain').html(makeOptions(domains, true)).on('change', loadUsers);
+}
+
+// ---- Users table with icons & admin-equivalent logic ----
 async function loadUsers(){
   const data = await api('/api/admin/users');
-  const q = $('#q').val()?.toLowerCase() || '';
+  const q = ($('#q').val() || '').toLowerCase();
+  const domFilter = ($('#u_domain').val() || '');
   const tbody = $('#users tbody').empty();
-  data.filter(u => u.samAccountName.toLowerCase().includes(q)).forEach(u=>{
-    const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
-    const tr = $('<tr>');
-    tr.append(`<td>${u.domain}</td>`);
-    tr.append(`<td>${u.samAccountName}</td>`);
-    tr.append(`<td>${u.displayName}</td>`);
-    tr.append(`<td>${status}</td>`);
-    tr.append(`<td>${u.expirationDate || ''}</td>`);
-    const btns = $('<td>');
-    btns.append($('<button class="btn">Unlock</button>').click(()=>api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers)));
-    btns.append(' ');
-    btns.append($('<button class="btn">Enable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers)));
-    btns.append(' ');
-    btns.append($('<button class="btn">Disable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers)));
-    btns.append(' ');
-    btns.append($('<button class="btn">Reset Password</button>').click(async()=>{
-      const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
-      alert('New password: ' + r.password);
-    }));
-    tr.append(btns);
-    tbody.append(tr);
-  });
-}
-$('#refresh').click(loadUsers);
-$('#q').on('input', loadUsers);
 
+  // Build a set of base names that have a -a privileged account
+  const adminBaseSet = new Set(
+    data
+      .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
+      .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
+  );
+
+  data
+    .filter(u => !domFilter || u.domain === domFilter)
+    .filter(u => (u.samAccountName || '').toLowerCase().includes(q))
+    .forEach(u => {
+      const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
+      const isPriv = !!u.isPrivileged;
+
+      // With Admin Account? column badge
+      let adminBadgeHtml = '';
+      if (isPriv) {
+        adminBadgeHtml = '<span class="badge bg-secondary">—</span>';
+      } else {
+        const base = (u.samAccountName || '').toLowerCase();
+        const hasAdmin = adminBaseSet.has(base);
+        adminBadgeHtml = hasAdmin
+          ? '<span class="badge bg-success">✓</span>'
+          : '<span class="badge bg-danger">✗</span>';
+      }
+
+      // Build icon action bar
+      const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
+
+      // Unlock
+      actions.append(
+        $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
+          .click(() => api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers))
+      );
+
+      // Enable
+      actions.append(
+        $('<button class="btn-icon text-success me-2" aria-label="Enable" data-bs-toggle="tooltip" title="Enable"><i class="bi bi-check-circle"></i></button>')
+          .click(() => api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers))
+      );
+
+      // Disable
+      actions.append(
+        $('<button class="btn-icon text-warning me-2" aria-label="Disable" data-bs-toggle="tooltip" title="Disable"><i class="bi bi-slash-circle"></i></button>')
+          .click(() => api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers))
+      );
+
+      // Reset Password
+      actions.append(
+        $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
+          .click(async () => {
+            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
+            alert('New password: ' + r.password);
+          })
+      );
+
+      // Reset Admin Password (only for standard accounts that have a -a)
+      if (!isPriv) {
+        const base = (u.samAccountName || '').toLowerCase();
+        if (adminBaseSet.has(base)) {
+          const adminSam = `${u.samAccountName}-a`;
+          actions.append(
+            $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
+              .click(async () => {
+                const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
+                alert('Admin account new password: ' + r.password);
+              })
+          );
+        }
+      }
+
+      const tr = $('<tr>');
+      tr.append(`<td>${u.domain}</td>`);
+      tr.append(`<td class="text-mono">${u.samAccountName}</td>`);
+      tr.append(`<td>${u.displayName}</td>`);
+      tr.append(`<td>${status}</td>`);
+      tr.append(`<td>${u.expirationDate || ''}</td>`);
+      tr.append(`<td class="text-center">${adminBadgeHtml}</td>`);
+      tr.append($('<td class="text-center">').append(actions));
+
+      tbody.append(tr);
+    });
+
+  initTooltips(document);
+}
+
+// ---- Create / Update actions (unchanged; server triggers PDF on create) ----
 $('#create').click(async ()=>{
   const body = {
     domain: $('#c_domain').val(),
     firstName: $('#c_fn').val(),
     lastName: $('#c_ln').val(),
-    birthdate: $('#c_dob').val() ? $('#c_dob').val() : null,
-    expirationDate: $('#c_exp').val() ? $('#c_exp').val() : null,
+    birthdate: $('#c_dob').val() || null,
+    expirationDate: $('#c_exp').val() || null,
     createPrivileged: $('#c_priv').is(':checked'),
-    samAccountName: $('#c_sam').val() || null,
+    samAccountName: $('#c_sam').val() || null
   };
-  await api('/api/admin/create-user','POST', body); // returns PDF
+  await api('/api/admin/create-user','POST', body);
 });
 
 $('#update').click(async ()=>{
@@ -97,8 +279,8 @@ $('#update').click(async ()=>{
     samAccountName: $('#c_sam').val(),
     firstName: $('#c_fn').val(),
     lastName: $('#c_ln').val(),
-    birthdate: $('#c_dob').val() ? $('#c_dob').val() : null,
-    expirationDate: $('#c_exp').val() ? $('#c_exp').val() : null,
+    birthdate: $('#c_dob').val() || null,
+    expirationDate: $('#c_exp').val() || null,
     createPrivileged: $('#c_priv').is(':checked')
   };
   if(!body.samAccountName){ alert('Username is required for update.'); return; }
@@ -111,7 +293,14 @@ $('#loadLogs').click(async ()=>{
   $('#logs').text(r.entries.join('\n'));
 });
 
-loadUsers();
+$('#refresh').click(loadUsers);
+$('#q').on('input', loadUsers);
+
+// ---- Init ----
+(async () => {
+  await populateDomains();
+  await loadUsers();
+})();
 </script>
 </body>
 </html>

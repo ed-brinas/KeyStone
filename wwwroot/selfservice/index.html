@@ -1,46 +1,150 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>Password Self-Service</title>
-  <link rel="stylesheet" href="/css/style.css" />
-  <script src="/js/jquery.min.js"></script>
-  <script src="/js/app.js"></script>
+  <meta charset="utf-8">
+  <title>ADWebManager - Admin Portal</title>
+  <link rel="stylesheet" href="/css/style.css">
+  
 </head>
 <body>
-  <div class="card">
-    <h1>Password Self-Service</h1>
-    <p>Use this page to change your own password. Privileged accounts (ending with "-a") are blocked.</p>
-  </div>
+  <h1>Admin Portal</h1>
 
-  <div class="card">
-    <div class="grid">
-      <div><label>Domain</label><select id="s_domain"><option>lab.local</option><option>new.lab.local</option><option>old.lab.local</option></select></div>
-      <div><label>Username</label><input id="s_sam" /></div>
-      <div><label>Date of Birth</label><input id="s_dob" type="date" /></div>
-      <div><label>Current Password</label><input id="s_cur" type="password" /></div>
-      <div><label>New Password</label><input id="s_new" type="password" /></div>
-      <div><label>Confirm New Password</label><input id="s_new2" type="password" /></div>
-    </div>
-    <div style="margin-top:10px;">
-      <button class="btn primary" id="s_change">Change Password</button>
-    </div>
-  </div>
+  <section>
+    <h2>Users</h2>
+    <input id="q" placeholder="Search..." oninput="loadUsers()">
+    <select id="u_domain" style="margin-left:8px;"></select>
+    <button onclick="loadUsers()">Refresh</button>
+    <table id="users" border="1" cellspacing="0" cellpadding="4">
+      <thead>
+        <tr><th>Domain</th><th>SAM</th><th>Name</th><th>Status</th><th>Expiration</th><th>Actions</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
-<script>
-$('#s_change').click(async ()=>{
-  const body = {
-    domain: $('#s_domain').val(),
-    samAccountName: $('#s_sam').val(),
-    birthdate: $('#s_dob').val() || null,
-    currentPassword: $('#s_cur').val(),
-    newPassword: $('#s_new').val()
-  };
-  if ($('#s_new').val() !== $('#s_new2').val()) { alert('Passwords do not match.'); return; }
-  const res = await api('/api/selfservice/reset-password', 'POST', body);
-  alert('Password changed successfully.');
-  $('#s_cur').val(''); $('#s_new').val(''); $('#s_new2').val('');
-});
-</script>
+  <section style="margin-top:30px;">
+    <h2>Create User</h2>
+    <div>
+      <label>Domain</label>
+      <select id="c_domain"></select>
+    </div>
+    <div>
+      <label>SAM</label>
+      <input id="c_sam">
+    </div>
+    <div>
+      <label>Display Name</label>
+      <input id="c_display">
+    </div>
+    <div>
+      <label>OU</label>
+      <input id="c_ou">
+    </div>
+    <div>
+      <label>Groups (comma-separated)</label>
+      <input id="c_groups">
+    </div>
+    <button onclick="createUser()">Create</button>
+  </section>
+
+  <footer style="margin-top:40px;text-align:center;font-size:.9rem;color:#666;">
+    <hr/>
+    <p>&copy; 2025 ADWebManager. All actions are logged and monitored.</p>
+  </footer>
+
+<script src="/js/jquery.min.js"></script>
+  <script>
+    async function api(url, method="GET", body){
+      const res = await fetch(url, {
+        method,
+        headers: {"Content-Type":"application/json"},
+        body: body ? JSON.stringify(body) : undefined
+      });
+      if(!res.ok) throw new Error(await res.text());
+      return await res.json();
+    }
+
+    // Populate domain dropdowns (Create User + filter)
+    async function populateDomains(){
+      let domains = [];
+      try {
+        domains = await api('/api/config/domains'); // expects string[]
+      } catch(e) {
+        console.warn("Domain list unavailable; using fallback");
+      }
+
+      const makeOptions = (list, includeAll=false) => {
+        if(!Array.isArray(list) || list.length===0){
+          return '<option value="" disabled selected>(no domains configured)</option>';
+        }
+        let opts = list.map(d=>`<option>${d}</option>`).join('');
+        if(includeAll){
+          opts = `<option value="">(all domains)</option>` + opts;
+        }
+        return opts;
+      };
+
+      // Create User dropdown
+      const c = document.getElementById("c_domain");
+      if(c) c.innerHTML = makeOptions(domains);
+
+      // Filter dropdown
+      const u = document.getElementById("u_domain");
+      if(u){
+        u.innerHTML = makeOptions(domains,true);
+        u.onchange = loadUsers;
+      }
+    }
+
+    async function loadUsers(){
+      const data = await api('/api/admin/users');
+      const q = ($('#q').val()||'').toLowerCase();
+      const domFilter = ($('#u_domain').val()||'');
+      const tbody = $('#users tbody').empty();
+      data
+        .filter(u => !domFilter || u.domain === domFilter)
+        .filter(u => (u.samAccountName||'').toLowerCase().includes(q))
+        .forEach(u=>{
+          const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
+          const tr = $('<tr>');
+          tr.append(`<td>${u.domain}</td>`);
+          tr.append(`<td>${u.samAccountName}</td>`);
+          tr.append(`<td>${u.displayName}</td>`);
+          tr.append(`<td>${status}</td>`);
+          tr.append(`<td>${u.expirationDate || ''}</td>`);
+          const btns = $('<td>');
+          btns.append($('<button class="btn">Unlock</button>').click(()=>api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName}).then(loadUsers)));
+          btns.append(' ');
+          btns.append($('<button class="btn">Enable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true}).then(loadUsers)));
+          btns.append(' ');
+          btns.append($('<button class="btn">Disable</button>').click(()=>api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false}).then(loadUsers)));
+          btns.append(' ');
+          btns.append($('<button class="btn">Reset Password</button>').click(async()=>{
+            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
+            alert('New password: ' + r.password);
+          }));
+          tr.append(btns);
+          tbody.append(tr);
+        });
+    }
+
+    async function createUser(){
+      const body = {
+        domain: $('#c_domain').val(),
+        samAccountName: $('#c_sam').val(),
+        displayName: $('#c_display').val(),
+        ou: $('#c_ou').val(),
+        groups: $('#c_groups').val().split(',').map(x=>x.trim()).filter(x=>x)
+      };
+      const r = await api('/api/admin/create','POST',body);
+      alert('User created: ' + r.samAccountName);
+      loadUsers();
+    }
+
+    $(function(){
+      populateDomains();
+      loadUsers();
+    });
+  </script>  
 </body>
 </html>
