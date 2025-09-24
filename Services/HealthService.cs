@@ -5,32 +5,18 @@ using System.DirectoryServices;
 using System.DirectoryServices.AccountManagement;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using ADWebManager.Models;
 using Microsoft.Extensions.Options;
 
 namespace ADWebManager.Services
 {
-    public class HealthOptions
-    {
-        /// <summary>Maximum milliseconds considered healthy for a simple LDAP query.</summary>
-        public int LdapHealthyMs { get; set; } = 800;
-
-        /// <summary>Warn when free space for the audit logs drive falls below this many megabytes.</summary>
-        public long LogFreeSpaceWarnMB { get; set; } = 2048;
-    }
-
     public class HealthService
     {
-        private readonly AdOptions _ad;
-        private readonly AuditLogOptions _audit;
-        private readonly HealthOptions _opts;
+        private readonly AdSettings _cfg;
 
-        public HealthService(IOptions<AdOptions> ad, IOptions<AuditLogOptions> audit, IOptions<HealthOptions> opts)
+        public HealthService(IOptions<AdSettings> cfg)
         {
-            _ad = ad.Value ?? new AdOptions();
-            _audit = audit.Value ?? new AuditLogOptions();
-            _opts = opts.Value ?? new HealthOptions();
+            _cfg = cfg.Value ?? new AdSettings();
         }
 
         public HealthReport GetReport()
@@ -41,38 +27,52 @@ namespace ADWebManager.Services
                 Domains = new List<DomainHealth>()
             };
 
-            foreach (var d in _ad.Domains)
+            // Group DC targets by domain, then check each host
+            var byDomain = (_cfg.Health?.DomainControllers ?? new List<DcTarget>()).GroupBy(dc => dc.Domain, StringComparer.OrdinalIgnoreCase);
+            foreach (var g in byDomain)
             {
-                r.Domains.Add(CheckDomain(d));
+                foreach (var dc in g)
+                    r.Domains.Add(CheckDomain(dc));
             }
 
-            r.LogStorage = CheckLogStorage(_audit.Directory);
+            r.LogStorage = CheckLogStorage(_cfg.Health?.LogDiskPath ?? "logs");
             return r;
         }
 
-        private DomainHealth CheckDomain(DomainConfig d)
+        private DomainHealth CheckDomain(DcTarget dc)
         {
             var dh = new DomainHealth
             {
-                Domain = d.Name,
-                LdapBaseDn = d.LdapBaseDn
+                Domain = dc.Domain ?? "",
+                Host = dc.Host ?? "",
+                LdapBaseDn = ToBaseDn(dc.Domain)
             };
 
-            // --- LDAP latency & bind health ---
+            var saUser = _cfg.Provisioning?.ServiceAccountUser ?? "";
+            var saPass = _cfg.Provisioning?.ServiceAccountPassword ?? "";
+            var healthyMs = _cfg.Health?.LdapLatencyWarnMs ?? 500; // warn threshold for “healthy”
+
+            // --- LDAP latency & bind health (against the specific DC host if provided) ---
             try
             {
+                var ldapPath = string.IsNullOrWhiteSpace(dc.Host)
+                    ? $"LDAP://{dh.LdapBaseDn}"
+                    : $"LDAP://{dc.Host}/{dh.LdapBaseDn}";
+
                 var sw = Stopwatch.StartNew();
-                using var root = new DirectoryEntry($"LDAP://{d.LdapBaseDn}", d.ServiceAccountUser, d.ServiceAccountPassword);
+                using var root = new DirectoryEntry(ldapPath, saUser, saPass);
                 using var ds = new DirectorySearcher(root)
                 {
-                    Filter = "(objectClass=domain)", SearchScope = SearchScope.Base, PageSize = 1
+                    Filter = "(objectClass=domain)",
+                    SearchScope = SearchScope.Base,
+                    PageSize = 1
                 };
                 ds.PropertiesToLoad.Add("distinguishedName");
                 _ = ds.FindOne();
                 sw.Stop();
 
                 dh.LdapLatencyMs = sw.ElapsedMilliseconds;
-                dh.LdapHealthy = sw.ElapsedMilliseconds <= _opts.LdapHealthyMs;
+                dh.LdapHealthy = sw.ElapsedMilliseconds <= healthyMs;
             }
             catch (Exception ex)
             {
@@ -83,8 +83,8 @@ namespace ADWebManager.Services
             // --- Service account status (enabled / locked out) ---
             try
             {
-                using var ctx = new PrincipalContext(ContextType.Domain, d.Name, d.ServiceAccountUser, d.ServiceAccountPassword);
-                var (idType, idValue) = ParseIdentity(d);
+                using var ctx = new PrincipalContext(ContextType.Domain, dc.Domain, saUser, saPass);
+                var (idType, idValue) = ParseIdentity(saUser);
                 using var up = UserPrincipal.FindByIdentity(ctx, idType, idValue);
                 if (up != null)
                 {
@@ -106,15 +106,6 @@ namespace ADWebManager.Services
             return dh;
         }
 
-        private static (IdentityType type, string value) ParseIdentity(DomainConfig d)
-        {
-            // d.ServiceAccountUser may be "DOMAIN\\user", or UPN "user@domain"
-            var u = d.ServiceAccountUser ?? "";
-            if (u.Contains("@")) return (IdentityType.UserPrincipalName, u);
-            if (u.Contains("\\")) return (IdentityType.SamAccountName, u.Split('\\').Last());
-            return (IdentityType.SamAccountName, u);
-        }
-
         private LogStorageHealth CheckLogStorage(string logDir)
         {
             try
@@ -124,10 +115,11 @@ namespace ADWebManager.Services
                 var root = Path.GetPathRoot(Path.GetFullPath(logDir)) ?? logDir;
                 var di = new DriveInfo(root);
 
-                // Some environments (containers) might not expose DriveInfo – fall back to directory size check if needed.
                 var free = di.IsReady ? di.AvailableFreeSpace : 0;
                 var total = di.IsReady ? di.TotalSize : 0;
-                var warn = free > 0 && (free / (1024 * 1024)) < _opts.LogFreeSpaceWarnMB;
+
+                var minMb = _cfg.Health?.LogDiskMinFreeMB ?? 1024;
+                var warn = free > 0 && (free / (1024 * 1024)) < minMb;
 
                 return new LogStorageHealth
                 {
@@ -152,6 +144,20 @@ namespace ADWebManager.Services
             }
         }
 
+        private static string ToBaseDn(string domain)
+        {
+            if (string.IsNullOrWhiteSpace(domain)) return "";
+            return string.Join(",", domain.Split('.').Select(part => $"DC={part}"));
+        }
+
+        private static (IdentityType type, string value) ParseIdentity(string user)
+        {
+            var u = user ?? "";
+            if (u.Contains("@")) return (IdentityType.UserPrincipalName, u);
+            if (u.Contains("\\")) return (IdentityType.SamAccountName, u.Split('\\').Last());
+            return (IdentityType.SamAccountName, u);
+        }
+
         private static string Shorten(string s) => string.IsNullOrWhiteSpace(s) ? s : (s.Length > 240 ? s.Substring(0, 240) + "…" : s);
     }
 
@@ -165,6 +171,7 @@ namespace ADWebManager.Services
     public class DomainHealth
     {
         public string Domain { get; set; } = "";
+        public string Host { get; set; } = "";
         public string LdapBaseDn { get; set; } = "";
         public long? LdapLatencyMs { get; set; }
         public bool LdapHealthy { get; set; }

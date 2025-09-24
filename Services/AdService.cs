@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.DirectoryServices;
@@ -220,6 +219,7 @@ namespace ADWebManager.Services
             user.Save();
         }
 
+        // Generate a compliant password (Standard vs Admin based on "-a")
         public string ResetPassword(string domain, string sam, bool unlock)
         {
             using var ctx = AdminContext(domain);
@@ -231,6 +231,17 @@ namespace ADWebManager.Services
             if (unlock) { try { user.UnlockAccount(); } catch { } user.Enabled = true; }
             user.Save();
             return newPass;
+        }
+
+        // NEW: Set an explicit password (already validated by caller)
+        public void SetPassword(string domain, string sam, string newPassword, bool unlock)
+        {
+            using var ctx = AdminContext(domain);
+            var user = FindBySam(ctx, sam) ?? throw new Exception("User not found.");
+
+            user.SetPassword(newPassword);
+            if (unlock) { try { user.UnlockAccount(); } catch { } user.Enabled = true; }
+            user.Save();
         }
 
         public async Task SelfServiceResetPasswordAsync(SelfServiceResetRequest req)

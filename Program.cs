@@ -1,5 +1,6 @@
 // Explicit usings so it compiles even if ImplicitUsings is disabled
 using System;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -18,18 +19,35 @@ using ADWebManager.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------- Options / DI ----------
-builder.Services.Configure<AdOptions>(builder.Configuration.GetSection("Ad"));
-builder.Services.Configure<AuditLogOptions>(builder.Configuration.GetSection("Audit"));
-builder.Services.Configure<HealthOptions>(builder.Configuration.GetSection("Health"));
-builder.Services.AddSingleton<AuditLogService>(_ =>
-    new AuditLogService(builder.Configuration.GetSection("Audit").Get<AuditLogOptions>() ?? new AuditLogOptions()));
-builder.Services.AddSingleton<PasswordService>(_ =>
-    new PasswordService(builder.Configuration.GetSection("PasswordPolicy").Get<PasswordPolicyOptions>() ?? new PasswordPolicyOptions()));
+builder.Services.Configure<AdSettings>(builder.Configuration.GetSection("AdSettings"));
+
+// Audit log service (uses directory from AdSettings.Audit.LocalFile.Path)
+builder.Services.AddSingleton<AuditLogService>(sp =>
+{
+    var ad = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdSettings>>().Value ?? new AdSettings();
+    var dir = ad.Audit?.LocalFile?.Path ?? "logs";
+    return new AuditLogService(new AuditLogOptions { Directory = Path.GetDirectoryName(dir) ?? "logs" });
+});
+
+// Password service now wired to AdSettings (Standard/Admin policy buckets)
+builder.Services.AddSingleton<PasswordService>(sp =>
+    new PasswordService(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdSettings>>()));
+
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddSingleton<AdService>();
 builder.Services.AddSingleton<HealthService>();
-builder.Services.AddSingleton<SecurityService>(_ =>
-    new SecurityService(builder.Configuration.GetSection("Security").Get<SecurityOptions>() ?? new SecurityOptions()));
+
+builder.Services.AddSingleton<SecurityService>(sp =>
+{
+    var ad = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdSettings>>().Value ?? new AdSettings();
+    var sess = ad.Security?.Session ?? new SessionSettings();
+    return new SecurityService(new SecurityOptions
+    {
+        IdleTimeoutMinutes = sess.IdleTimeoutMinutes,
+        AbsoluteTimeoutMinutes = sess.AbsoluteTimeoutMinutes,
+        SessionCookieName = "adwm.sid"
+    });
+});
 
 // Windows (Negotiate) auth for /admin APIs
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
@@ -91,41 +109,28 @@ async Task<T> ReadJson<T>(HttpContext ctx)
 string Caller(HttpContext ctx) => ctx.User?.Identity?.Name ?? "(anon)";
 string RemoteIp(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "(unknown)";
 
+static string[] AllDomains(AdSettings ad)
+{
+    var root = string.IsNullOrWhiteSpace(ad.ForestRootDomain) ? Array.Empty<string>() : new[] { ad.ForestRootDomain };
+    var children = ad.ForestChildDomain ?? new();
+    return root.Concat(children).ToArray();
+}
+
 // ---------- Routes ----------
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; }).AllowAnonymous();
 
-app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
+app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdSettings> cfg) =>
 {
-    var names = (ao.Value?.Domains ?? new()).Select(d => d.Name).ToArray();
-    return Results.Ok(names);
+    var ad = cfg.Value ?? new AdSettings();
+    return Results.Ok(AllDomains(ad));
 }).AllowAnonymous();
 
-app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
+// Returns the configured privileged groups from AdSettings
+app.MapGet("/api/config/privileged-groups", (HttpContext ctx, Microsoft.Extensions.Options.IOptions<AdSettings> cfg) =>
 {
-    try
-    {
-        var req = await ReadJson<SelfServiceResetRequest>(ctx);
-        var (ok, problems) = pw.CheckStrength(req.NewPassword);
-        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
-
-        await ad.SelfServiceResetPasswordAsync(req);
-        audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        audit.Write("(selfservice)", "reset", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).AllowAnonymous();
-
-// Returns the configured privileged groups for a domain (from appsettings)
-app.MapGet("/api/config/privileged-groups", (HttpContext ctx, Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
-{
-    var domain = ctx.Request.Query["domain"].ToString();
-    var d = (ao.Value?.Domains ?? new()).FirstOrDefault(x => x.Name.Equals(domain, StringComparison.OrdinalIgnoreCase));
-    if (d == null) return Results.Ok(Array.Empty<string>());
-    return Results.Ok(d.PrivilegedGroups ?? Array.Empty<string>());
+    var ad = cfg.Value ?? new AdSettings();
+    var groups = ad.Provisioning?.OptionalPrivilegeGroup ?? new();
+    return Results.Ok(groups);
 }).AllowAnonymous();
 
 // -------- Admin (Windows auth) --------
@@ -139,17 +144,16 @@ app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, Ht
     }
 }).RequireAuthorization("AdminOnly");
 
-app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService audit, Microsoft.Extensions.Options.IOptions<AdOptions> adOpts) =>
+app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogService audit, Microsoft.Extensions.Options.IOptions<AdSettings> cfg) =>
 {
     try
     {
-        var domain = ctx.Request.Query["domain"].ToString();
+        var ad = cfg.Value ?? new AdSettings();
+        var queryDomain = ctx.Request.Query["domain"].ToString();
         var results = new System.Collections.Generic.List<UserRow>();
-        var domains = adOpts.Value.Domains.Select(d => d.Name);
-        if (!string.IsNullOrWhiteSpace(domain))
-            results.AddRange(ad.ListUsers(domain));
-        else
-            foreach (var d in domains) results.AddRange(ad.ListUsers(d));
+        var domains = string.IsNullOrWhiteSpace(queryDomain) ? AllDomains(ad) : new[] { queryDomain };
+
+        foreach (var d in domains) results.AddRange(adSvc.ListUsers(d));
         return Results.Ok(results);
     }
     catch (Exception ex)
@@ -158,6 +162,25 @@ app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService a
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
 }).RequireAuthorization("AdminOnly");
+
+app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
+{
+    try
+    {
+        var req = await ReadJson<SelfServiceResetRequest>(ctx);
+        var (ok, problems) = pw.CheckStrengthForUser(req.SamAccountName, req.NewPassword);
+        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
+
+        await ad.SelfServiceResetPasswordAsync(req);
+        audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
+        return Results.Ok(new { ok = true });
+    }
+    catch (Exception ex)
+    {
+        audit.Write("(selfservice)", "reset", "-", false, ex.Message, RemoteIp(ctx));
+        return Results.BadRequest(new { ok = false, message = ex.Message });
+    }
+}).AllowAnonymous();
 
 app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
@@ -215,58 +238,42 @@ app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, Audi
     }
 }).RequireAuthorization("AdminOnly");
 
-app.MapPost("/api/admin/unlock", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
+// UPDATED: enforce CheckStrengthForUser when a new password is provided
+app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
     var caller = Caller(ctx);
     try
     {
         using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
-        var domain = doc.RootElement.GetProperty("domain").GetString()!;
-        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
-        ad.UnlockAccount(domain, sam);
-        audit.Write(caller, "unlock", $"{domain}\\{sam}", true, null, RemoteIp(ctx));
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        audit.Write(caller, "unlock", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminOnly");
+        var root = doc.RootElement;
 
-app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
-{
-    var caller = Caller(ctx);
-    try
-    {
-        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
-        var domain = doc.RootElement.GetProperty("domain").GetString()!;
-        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
-        var enable = doc.RootElement.GetProperty("enable").GetBoolean();
-        ad.SetEnabled(domain, sam, enable);
-        audit.Write(caller, enable ? "enable" : "disable", $"{domain}\\{sam}", true, null, RemoteIp(ctx));
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        audit.Write(caller, "enable/disable", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminOnly");
+        var domain = root.GetProperty("domain").GetString()!;
+        var sam = root.GetProperty("samAccountName").GetString()!;
+        var unlock = root.TryGetProperty("unlock", out var u) && u.GetBoolean();
 
-app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
-{
-    var caller = Caller(ctx);
-    try
-    {
-        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
-        var domain = doc.RootElement.GetProperty("domain").GetString()!;
-        var sam = doc.RootElement.GetProperty("samAccountName").GetString()!;
-        var unlock = doc.RootElement.TryGetProperty("unlock", out var u) && u.GetBoolean();
+        // Optional newPassword path: validate vs. Standard/Admin policy, then set it
+        string? newPassword = null;
+        if (root.TryGetProperty("newPassword", out var np) && np.ValueKind == JsonValueKind.String)
+            newPassword = np.GetString();
 
-        var pw = ad.ResetPassword(domain, sam, unlock);
-        audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "unlock=" + unlock, RemoteIp(ctx));
-        return Results.Ok(new { ok = true, password = pw });
+        if (!string.IsNullOrWhiteSpace(newPassword))
+        {
+            var (ok, problems) = pw.CheckStrengthForUser(sam, newPassword!);
+            if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
+
+            ad.SetPassword(domain, sam, newPassword!, unlock);
+            audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=true; unlock=" + unlock, RemoteIp(ctx));
+            // For security, don't echo the provided password back.
+            return Results.Ok(new { ok = true, generated = false });
+        }
+        else
+        {
+            // Legacy/generate path: generate compliant password via AdService policy
+            var generated = ad.ResetPassword(domain, sam, unlock);
+            audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=false; unlock=" + unlock, RemoteIp(ctx));
+            // We return the generated password so the admin can deliver it to the user.
+            return Results.Ok(new { ok = true, generated = true, password = generated });
+        }
     }
     catch (Exception ex)
     {
@@ -277,7 +284,5 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
 
 // Logs tail
 app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization("AdminOnly");
-
-
 
 app.Run();

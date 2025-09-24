@@ -2,55 +2,121 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
+using System.Security.Cryptography;
+using Microsoft.Extensions.Options;
+using ADWebManager.Models;
 
 namespace ADWebManager.Services
 {
-    public class PasswordPolicyOptions
-    {
-        public int MinLength { get; set; } = 8;
-        public bool RequireUpper { get; set; } = true;
-        public bool RequireLower { get; set; } = true;
-        public bool RequireDigit { get; set; } = true;
-        public bool RequireSpecial { get; set; } = true;
-        public int HistoryRemember { get; set; } = 5; // advisory (AD enforces actual history)
-        public string? LocalBannedListPath { get; set; } // optional (offline)
-    }
-
     public class PasswordService
     {
-        private readonly PasswordPolicyOptions _opts;
+        private readonly Policy _std;
+        private readonly Policy _adm;
         private readonly HashSet<string> _bannedSha1 = new(StringComparer.OrdinalIgnoreCase);
 
-        public PasswordService(PasswordPolicyOptions opts)
+        private sealed class Policy
         {
-            _opts = opts ?? new PasswordPolicyOptions();
-            LoadBannedList();
+            public int Length { get; init; }
+            public bool IncludeLetters { get; init; }
+            public bool IncludeDigits { get; init; }
+            public bool IncludeSpecials { get; init; }
+            public string AllowedSpecials { get; init; } = "";
         }
 
-        public (bool ok, string[] problems) CheckStrength(string password)
+        public PasswordService(IOptions<AdSettings> cfg)
+        {
+            var ad  = cfg.Value ?? new AdSettings();
+            var std = ad.PasswordPolicy?.Standard ?? new PolicyBucket();
+            var adm = ad.PasswordPolicy?.Admin    ?? new PolicyBucket();
+
+            _std = new Policy
+            {
+                Length = Math.Max(1, std.Length),
+                IncludeLetters = std.IncludeLetters,
+                IncludeDigits  = std.IncludeDigits,
+                IncludeSpecials = std.IncludeSpecials,
+                AllowedSpecials = std.AllowedSpecials ?? ""
+            };
+            _adm = new Policy
+            {
+                Length = Math.Max(1, adm.Length),
+                IncludeLetters = adm.IncludeLetters,
+                IncludeDigits  = adm.IncludeDigits,
+                IncludeSpecials = adm.IncludeSpecials,
+                AllowedSpecials = adm.AllowedSpecials ?? ""
+            };
+
+            // Optional: environment-based banned list
+            var bannedPath = Environment.GetEnvironmentVariable("PASSWORD_BANNED_LIST");
+            if (!string.IsNullOrWhiteSpace(bannedPath) && File.Exists(bannedPath))
+                LoadBannedList(bannedPath);
+        }
+
+        // Back-compat: validates against Standard policy
+        public (bool ok, string[] problems) CheckStrength(string password) =>
+            ValidateAgainstPolicy(_std, password);
+
+        // New: chooses Admin policy if SAM ends with "-a" (case-insensitive), else Standard
+        public (bool ok, string[] problems) CheckStrengthForUser(string samAccountName, string password)
+        {
+            var policy = samAccountName?.EndsWith("-a", StringComparison.OrdinalIgnoreCase) == true ? _adm : _std;
+            return ValidateAgainstPolicy(policy, password);
+        }
+
+        private (bool ok, string[] problems) ValidateAgainstPolicy(Policy policy, string password)
         {
             var issues = new List<string>();
-            if (string.IsNullOrEmpty(password) || password.Length < _opts.MinLength) issues.Add($"Minimum length is {_opts.MinLength}.");
-            if (_opts.RequireUpper && !password.Any(char.IsUpper)) issues.Add("At least one uppercase letter is required.");
-            if (_opts.RequireLower && !password.Any(char.IsLower)) issues.Add("At least one lowercase letter is required.");
-            if (_opts.RequireDigit && !password.Any(char.IsDigit)) issues.Add("At least one digit is required.");
-            if (_opts.RequireSpecial && !password.Any(ch => !char.IsLetterOrDigit(ch))) issues.Add("At least one special character is required.");
-            if (IsBanned(password)) issues.Add("This password appears in the banned list.");
-            return (!issues.Any(), issues.ToArray());
+            if (string.IsNullOrEmpty(password) || password.Length < policy.Length)
+                issues.Add($"Minimum length is {policy.Length}.");
+
+            bool hasLetter = password.Any(char.IsLetter);
+            bool hasDigit  = password.Any(char.IsDigit);
+
+            var specials = password.Where(ch => !char.IsLetterOrDigit(ch)).ToArray();
+            bool hasAllowedSpecial = specials.Any(ch => policy.AllowedSpecials.Contains(ch));
+            bool hasAnyDisallowedSpecial = specials.Any(ch => !policy.AllowedSpecials.Contains(ch));
+
+            if (policy.IncludeLetters && !hasLetter)
+                issues.Add("At least one letter is required.");
+
+            if (policy.IncludeDigits && !hasDigit)
+                issues.Add("At least one digit is required.");
+
+            if (policy.IncludeSpecials)
+            {
+                if (policy.AllowedSpecials.Length == 0)
+                {
+                    if (specials.Length == 0)
+                        issues.Add("At least one special character is required.");
+                }
+                else
+                {
+                    if (!hasAllowedSpecial)
+                        issues.Add($"At least one special character from the allowed set is required: {policy.AllowedSpecials}");
+                    if (hasAnyDisallowedSpecial)
+                        issues.Add("Contains special characters outside the allowed set.");
+                }
+            }
+            else
+            {
+                if (policy.AllowedSpecials.Length > 0 && hasAnyDisallowedSpecial)
+                    issues.Add("Contains special characters outside the allowed set.");
+            }
+
+            if (IsBanned(password))
+                issues.Add("This password appears in the banned list.");
+
+            return (issues.Count == 0, issues.ToArray());
         }
 
-        private void LoadBannedList()
+        private void LoadBannedList(string path)
         {
-            if (string.IsNullOrWhiteSpace(_opts.LocalBannedListPath)) return;
-            if (!File.Exists(_opts.LocalBannedListPath)) return;
-            foreach (var line in File.ReadLines(_opts.LocalBannedListPath))
+            foreach (var line in File.ReadLines(path))
             {
                 var p = line.Trim();
                 if (p.Length == 0) continue;
-                var sha1 = Sha1Hex(Encoding.UTF8.GetBytes(p));
-                _bannedSha1.Add(sha1);
+                _bannedSha1.Add(Sha1Hex(Encoding.UTF8.GetBytes(p)));
             }
         }
 
