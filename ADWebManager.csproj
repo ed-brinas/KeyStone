@@ -1,15 +1,22 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
+    <!-- Use the same major as your runtime; net6.0/net7.0/net8.0 all OK -->
     <TargetFramework>net8.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Required to build DirectoryServices on non-Windows dev boxes -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- Optional but recommended for IIS worker process -->
     <InvariantGlobalization>false</InvariantGlobalization>
-    <PublishSingleFile>false</PublishSingleFile>
-    <SelfContained>false</SelfContained>
-    <UserSecretsId>adwebmanager-offline</UserSecretsId>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
+
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- AD / LDAP APIs -->
+    <PackageReference Include="System.DirectoryServices" Version="8.0.0" />
+    <PackageReference Include="System.DirectoryServices.AccountManagement" Version="8.0.0" />
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="8.0.0" />
+
+    <!-- Windows Negotiate (Kerberos/NTLM) for /admin -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.8" />
   </ItemGroup>
 </Project>
