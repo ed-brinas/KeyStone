@@ -9,6 +9,8 @@ namespace ADWebManager.Services
         public SecuritySettings? Security { get; set; }
         public ProvisioningSettings? Provisioning { get; set; }
         public PasswordPolicy? PasswordPolicy { get; set; }
+        public HealthCheckSettings? HealthChecks { get; set; }
+        public AuditSettings? Audit { get; set; }
         public string? BirthdateAttribute { get; set; }
         public int PrivilegedAccountValidityDays { get; set; } = 90;
     }
@@ -50,6 +52,27 @@ namespace ADWebManager.Services
         public bool IncludeDigits { get; set; }
         public bool IncludeSpecials { get; set; }
         public string? AllowedSpecials { get; set; }
+    }
+
+    public class HealthCheckSettings
+    {
+        public List<DcTarget>? DomainControllers { get; set; }
+    }
+
+    public class DcTarget
+    {
+        public string? Name { get; set; }
+        public string? Domain { get; set; }
+    }
+    
+    public class AuditSettings
+    {
+        public AuditFileSettings? LocalFile { get; set; }
+    }
+
+    public class AuditFileSettings
+    {
+        public string? Path { get; set; }
     }
 }
 

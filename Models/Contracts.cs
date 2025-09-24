@@ -1,69 +1,95 @@
-namespace ADWebManager.Models;
+using System;
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
-// ---------- Self-Service ----------
-public record SelfServiceResetRequest(string Domain, string SamAccountName, string Birthdate, string MobileLast4, string NewPassword);
-
-// ---------- Admin - User Management ----------
-public record CreateUserRequest(
-    string Domain,
-    string SamAccountName,
-    string FirstName,
-    string LastName,
-    DateOnly? Birthdate,
-    DateOnly? ExpirationDate,
-    string MobileNumber,
-    bool CreatePrivileged,
-    string? SelectedPrivilegedGroupCn,
-    bool MakeSelectedPrimary,
-    string[] SelectedGeneralAccessGroups,
-    string[] SelectedPrivilegeAccessGroups
-);
-
-public record CreateUserResult
+namespace ADWebManager.Models
 {
-    public string Domain { get; set; } = string.Empty;
-    public string SamAccountName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string DistinguishedName { get; set; } = string.Empty;
-    public string OuCreatedIn { get; set; } = string.Empty;
-    public bool Enabled { get; set; }
-    public bool IsLocked { get; set; }
-    public DateTime? ExpirationDate { get; set; }
-    public string? MobileNumber { get; set; }
-    public string InitialPassword { get; set; } = string.Empty;
-    public string? AdminInitialPassword { get; set; }
-    public bool HasPrivileged { get; set; }
-    public string[]? GroupsAdded { get; set; }
+    public class SelfServiceResetRequest
+    {
+        public string Domain { get; set; } = "";
+        public string SamAccountName { get; set; } = "";
+        public string Birthdate { get; set; } = "";
+        public string MobileLast4 { get; set; } = "";
+        public string NewPassword { get; set; } = "";
+    }
+
+    public class CreateUserRequest
+    {
+        public string Domain { get; set; } = "";
+        public string SamAccountName { get; set; } = "";
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public DateOnly? Birthdate { get; set; }
+        public DateOnly? ExpirationDate { get; set; }
+        public string MobileNumber { get; set; } = "";
+        public bool CreatePrivileged { get; set; }
+        public string? SelectedPrivilegedGroupCn { get; set; }
+        public bool MakeSelectedPrimary { get; set; }
+        public List<string>? SelectedGeneralAccessGroups { get; set; }
+        public List<string>? SelectedPrivilegeAccessGroups { get; set; }
+    }
+    
+    public class UpdateUserRequest
+    {
+        public string Domain { get; set; } = "";
+        public string SamAccountName { get; set; } = "";
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public DateOnly? Birthdate { get; set; }
+        public DateOnly? ExpirationDate { get; set; }
+        public string MobileNumber { get; set; } = "";
+    }
+
+
+    public class CreateUserResult
+    {
+        public string Domain { get; set; } = "";
+        public string SamAccountName { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public string DistinguishedName { get; set; } = "";
+        public string OuCreatedIn { get; set; } = "";
+        public bool Enabled { get; set; }
+        public bool IsLocked { get; set; }
+        public DateTime? ExpirationDate { get; set; }
+        public string? MobileNumber { get; set; }
+        public string InitialPassword { get; set; } = "";
+        public string? AdminInitialPassword { get; set; }
+        public bool HasPrivileged { get; set; }
+        public string[]? GroupsAdded { get; set; }
+    }
+
+    public class UserRow
+    {
+        public string Domain { get; set; } = "";
+        public string SamAccountName { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public bool Enabled { get; set; }
+        public bool IsLocked { get; set; }
+        public DateTime? ExpirationDate { get; set; }
+        public bool IsPrivileged { get; set; }
+    }
+
+    public class UserDetails : UserRow
+    {
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public DateOnly? Birthdate { get; set; }
+        public string? MobileNumber { get; set; }
+    }
+    
+    public class HealthReport
+    {
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        public List<DcCheckResult> DomainControllerChecks { get; set; } = new();
+    }
+
+    public class DcCheckResult
+    {
+        public string? Name { get; set; }
+        public string? Domain { get; set; }
+        public bool IsReachable { get; set; }
+        public long LatencyMs { get; set; }
+        public string? Error { get; set; }
+    }
 }
 
-public record UpdateUserRequest(
-    string Domain,
-    string SamAccountName,
-    string FirstName,
-    string LastName,
-    DateOnly? Birthdate,
-    DateOnly? ExpirationDate,
-    string MobileNumber
-);
-
-public record UserRow
-{
-    public string Domain { get; set; } = string.Empty;
-    public string SamAccountName { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public bool Enabled { get; set; }
-    public bool IsLocked { get; set; }
-    public DateTime? ExpirationDate { get; set; }
-    public bool IsPrivileged { get; set; }
-}
-
-public record UserDetails
-{
-    public string Domain { get; set; } = string.Empty;
-    public string SamAccountName { get; set; } = string.Empty;
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
-    public string? MobileNumber { get; set; }
-    public string? Birthdate { get; set; } // Using string for yyyy-MM-dd format
-    public DateTime? ExpirationDate { get; set; }
-}
