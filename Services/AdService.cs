@@ -114,10 +114,8 @@ namespace ADWebManager.Services
                 deUser.Properties["mobile"].Value = req.MobileNumber;
             deUser.CommitChanges();
 
-            // Standard groups (from UI selection)
+            // Track groups actually added (privileged path only)
             var groupsAdded = new List<string>();
-            foreach (var g in (req.SelectedStandardGroups ?? new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
-                TryAddToGroup(req.Domain, sam, g, groupsAdded);
 
             // Privileged (-a) optional
             string? adminPass = null;
@@ -143,12 +141,14 @@ namespace ADWebManager.Services
                 admin.PasswordNeverExpires = false; // no immediate expiration
                 admin.Save();
 
-                foreach (var g in (req.SelectedPrivilegedGroups ?? new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
-                    TryAddToGroup(req.Domain, adminSam, g, groupsAdded);
+                // Single selected privileged group from request (SelectedPrivilegedGroupCn)
+                if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
+                    TryAddToGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn, groupsAdded);
 
-                if (!string.IsNullOrWhiteSpace(req.PrimaryPrivilegedGroup))
+                // If requested, set selected privileged group as primary and remove Domain Users
+                if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                 {
-                    TrySetPrimaryGroup(req.Domain, adminSam, req.PrimaryPrivilegedGroup!);
+                    TrySetPrimaryGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn);
                     TryRemoveFromGroup(req.Domain, adminSam, "Domain Users");
                 }
 
@@ -233,7 +233,7 @@ namespace ADWebManager.Services
             return newPass;
         }
 
-        // NEW: Set an explicit password (already validated by caller)
+        // Set an explicit password (already validated by caller)
         public void SetPassword(string domain, string sam, string newPassword, bool unlock)
         {
             using var ctx = AdminContext(domain);
@@ -261,7 +261,7 @@ namespace ADWebManager.Services
             var mobile = (de.Properties["mobile"]?.Value as string) ?? string.Empty;
             var digits = new string(mobile.Where(char.IsDigit).ToArray());
             var last4 = digits.Length >= 4 ? digits[^4..] : digits;
-            if (!string.Equals(last4, req.MobileLast4.Trim(), StringComparison.Ordinal))
+            if (!string.Equals(last4, req.MobileLast4?.Trim() ?? "", StringComparison.Ordinal))
                 throw new Exception("Identity verification failed (mobile).");
 
             user.SetPassword(req.NewPassword);
