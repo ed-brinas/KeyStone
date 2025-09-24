@@ -96,84 +96,88 @@ async function openEditModal(domain, sam) {
 
 // -------- Users grid --------
 async function loadUsers(){
-  const data = await api('/api/admin/users');
-  const q = ($('#q').val() || '').toLowerCase();
-  const domFilter = ($('#u_domain').val() || '');
-  const tbody = $('#users tbody').empty();
+  try {
+    const data = await api('/api/admin/users');
+    const q = ($('#q').val() || '').toLowerCase();
+    const domFilter = ($('#u_domain').val() || '');
+    const tbody = $('#users tbody').empty();
 
-  const adminBaseSet = new Set(
+    const adminBaseSet = new Set(
+      data
+        .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
+        .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
+    );
+
     data
-      .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
-      .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
-  );
+      .filter(u => !domFilter || u.domain === domFilter)
+      .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q))
+      .forEach(u => {
+        const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
+        const isPriv = !!u.isPrivileged;
+        const base = (u.samAccountName || '').toLowerCase();
+        const hasAdmin = !isPriv && adminBaseSet.has(base);
+        const adminBadgeHtml = isPriv
+          ? '<span class="badge bg-secondary">—</span>'
+          : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
 
-  data
-    .filter(u => !domFilter || u.domain === domFilter)
-    .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q))
-    .forEach(u => {
-      const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
-      const isPriv = !!u.isPrivileged;
-      const base = (u.samAccountName || '').toLowerCase();
-      const hasAdmin = !isPriv && adminBaseSet.has(base);
-      const adminBadgeHtml = isPriv
-        ? '<span class="badge bg-secondary">—</span>'
-        : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
+        const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
+        
+        if (!isPriv) {
+            actions.append(
+              $('<button class="btn-icon text-info me-2" aria-label="Edit" data-bs-toggle="tooltip" title="Edit User"><i class="bi bi-pencil-square"></i></button>')
+                .click(() => openEditModal(u.domain, u.samAccountName))
+            );
+        }
 
-      const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
-      
-      if (!isPriv) {
-          actions.append(
-            $('<button class="btn-icon text-info me-2" aria-label="Edit" data-bs-toggle="tooltip" title="Edit User"><i class="bi bi-pencil-square"></i></button>')
-              .click(() => openEditModal(u.domain, u.samAccountName))
-          );
-      }
-
-      actions.append(
-        $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Unlock Account', `Unlock <code>${u.samAccountName}</code> on <code>${u.domain}</code>?`);
-            if (!ok) return;
-            await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName, unlock: true});
-            showInfo('Unlocked', `Account <code>${u.samAccountName}</code> was unlocked.`);
-            loadUsers();
-          })
-      );
-      actions.append(
-        $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Reset Password', `Reset password for <code>${u.samAccountName}</code>? This will also unlock the account.`);
-            if (!ok) return;
-            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
-            showInfo('Password Reset', `New password for <code>${u.samAccountName}</code>:<br><code class="text-mono">${r.password}</code>`);
-            loadUsers();
-          })
-      );
-      if (!isPriv && hasAdmin) {
-        const adminSam = `${u.samAccountName}-a`;
         actions.append(
-          $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
+          $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
             .click(async () => {
-              const ok = await confirmAction('Reset Admin Password', `Reset password for admin account <code>${adminSam}</code>?`);
+              const ok = await confirmAction('Unlock Account', `Unlock <code>${u.samAccountName}</code> on <code>${u.domain}</code>?`);
               if (!ok) return;
-              const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
-              showInfo('Admin Password Reset', `New password for <code>${adminSam}</code>:<br><code class="text-mono">${r.password}</code>`);
+              await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName, unlock: true});
+              showInfo('Unlocked', `Account <code>${u.samAccountName}</code> was unlocked.`);
               loadUsers();
             })
         );
-      }
+        actions.append(
+          $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
+            .click(async () => {
+              const ok = await confirmAction('Reset Password', `Reset password for <code>${u.samAccountName}</code>? This will also unlock the account.`);
+              if (!ok) return;
+              const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
+              showInfo('Password Reset', `New password for <code>${u.samAccountName}</code>:<br><code class="text-mono">${r.password}</code>`);
+              loadUsers();
+            })
+        );
+        if (!isPriv && hasAdmin) {
+          const adminSam = `${u.samAccountName}-a`;
+          actions.append(
+            $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
+              .click(async () => {
+                const ok = await confirmAction('Reset Admin Password', `Reset password for admin account <code>${adminSam}</code>?`);
+                if (!ok) return;
+                const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
+                showInfo('Admin Password Reset', `New password for <code>${adminSam}</code>:<br><code class="text-mono">${r.password}</code>`);
+                loadUsers();
+              })
+          );
+        }
 
-      const tr = $('<tr>');
-      tr.append(`<td>${u.domain}</td>`);
-      tr.append(`<td class="text-mono">${u.samAccountName}</td>`);
-      tr.append(`<td>${u.displayName}</td>`);
-      tr.append(`<td>${status}</td>`);
-      tr.append(`<td>${u.expirationDate ? u.expirationDate.split('T')[0] : 'Never'}</td>`);
-      tr.append(`<td class="text-center">${adminBadgeHtml}</td>`);
-      tr.append($('<td class="text-center">').append(actions));
-      tbody.append(tr);
-    });
+        const tr = $('<tr>');
+        tr.append(`<td>${u.domain}</td>`);
+        tr.append(`<td class="text-mono">${u.samAccountName}</td>`);
+        tr.append(`<td>${u.displayName}</td>`);
+        tr.append(`<td>${status}</td>`);
+        tr.append(`<td>${u.expirationDate ? u.expirationDate.split('T')[0] : 'Never'}</td>`);
+        tr.append(`<td class="text-center">${adminBadgeHtml}</td>`);
+        tr.append($('<td class="text-center">').append(actions));
+        tbody.append(tr);
+      });
 
-  initTooltips(document);
+    initTooltips(document);
+  } catch (err) {
+      showInfo('Error Loading Users', `There was a problem retrieving the user list from the server. Please check the application logs for more details.<br><br><i><small>${err.message || 'No additional details available.'}</small></i>`);
+  }
 }
 
 // -------- Form helpers --------

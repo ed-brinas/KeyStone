@@ -168,6 +168,73 @@ namespace ADWebManager.Services
                 GroupsAdded = groupsAdded.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             };
         }
+        
+        public IReadOnlyList<UserRow> ListUsers(string domain)
+        {
+            var results = new List<UserRow>();
+            if (_cfg.Provisioning?.SearchBaseOus == null) return results;
+
+            foreach (var baseOuFmt in _cfg.Provisioning.SearchBaseOus)
+            {
+                var baseOu = ExpandOu(baseOuFmt, domain);
+                using var de = new DirectoryEntry($"LDAP://{baseOu}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
+                using var ds = new DirectorySearcher(de)
+                {
+                    Filter = "(&(objectCategory=person)(objectClass=user)(!(objectClass=computer)))",
+                    PageSize = 500,
+                    SearchScope = SearchScope.Subtree
+                };
+                ds.PropertiesToLoad.AddRange(new[] { "samAccountName", "displayName", "userAccountControl", "lockoutTime", "accountExpires" });
+
+                try
+                {
+                    foreach (SearchResult r in ds.FindAll())
+                    {
+                        var sam = r.Properties["samAccountName"]?.Count > 0 ? (string)r.Properties["samAccountName"][0] : null;
+                        if (string.IsNullOrWhiteSpace(sam)) continue;
+                        var display = r.Properties["displayName"]?.Count > 0 ? (string)r.Properties["displayName"][0] : sam;
+
+                        bool enabled = true;
+                        if (r.Properties["userAccountControl"]?.Count > 0)
+                        {
+                            var uac = (int)r.Properties["userAccountControl"][0];
+                            enabled = (uac & 0x2) == 0;
+                        }
+
+                        bool isLocked = false;
+                        if (r.Properties["lockoutTime"]?.Count > 0)
+                        {
+                            var val = (long)r.Properties["lockoutTime"][0];
+                            isLocked = val != 0;
+                        }
+
+                        DateTime? expiration = null;
+                        if (r.Properties["accountExpires"]?.Count > 0)
+                        {
+                            var exp = (long)r.Properties["accountExpires"][0];
+                            if (exp != 0 && exp != 0x7FFFFFFFFFFFFFFF)
+                                expiration = DateTime.FromFileTimeUtc(exp);
+                        }
+
+                        results.Add(new UserRow
+                        {
+                            Domain = domain,
+                            SamAccountName = sam,
+                            DisplayName = display,
+                            Enabled = enabled,
+                            IsLocked = isLocked,
+                            ExpirationDate = expiration,
+                            IsPrivileged = sam.EndsWith("-a", StringComparison.OrdinalIgnoreCase)
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error searching OU {baseOu}: {ex.Message}");
+                }
+            }
+            return results;
+        }
 
         public UserDetails GetUserDetails(string domain, string sam)
         {
