@@ -7,7 +7,7 @@
   const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
 })();
 
-// -------- Modals --------
+// -------- Modals (info/confirm) --------
 function showInfo(title, html) {
   document.getElementById('infoModalTitle').textContent = title || 'Notice';
   document.getElementById('infoModalBody').innerHTML = html || '';
@@ -170,8 +170,8 @@ function formDataOrInvalid() {
     mobileNumber: $('#c_mobile').val(),
     samAccountName: $('#c_sam').val(),
     createPrivileged: $('#c_priv').is(':checked'),
-    selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,  // NEW
-    makeSelectedPrimary: $('#c_priv_primary').is(':checked')      // NEW
+    selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,
+    makeSelectedPrimary: $('#c_priv_primary').is(':checked')
   };
 }
 
@@ -252,10 +252,13 @@ $('#c_domain').on('change', function(){
 
 // -------- Init --------
 (async () => {
-  // Ensure session/CSRF cookie exists (app.js also tries, this is just explicit)
   try { await bootstrapSession(); } catch {}
   await populateDomains();
+  // Preload privileged groups for initial domain in form modal
   const d = $('#c_domain').val();
   await loadPrivilegedGroupsFor(d);
   await loadUsers();
+
+  // Optional: open the Create modal on first visit if desired
+  // new bootstrap.Modal(document.getElementById('userFormModal')).show();
 })();

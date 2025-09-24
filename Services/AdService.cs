@@ -15,16 +15,18 @@ namespace ADWebManager.Services
     public class AdOptions
     {
         public List<DomainConfig> Domains { get; set; } = new();
-        /// <summary>Which AD attribute stores the DOB in "yyyy-MM-dd" (e.g., "extensionAttribute1").</summary>
+
+        /// <summary>AD attribute used to store DOB in "yyyy-MM-dd" (e.g., extensionAttribute1).</summary>
         public string BirthdateAttribute { get; set; } = "extensionAttribute1";
-        /// <summary>How many days a privileged (-a) account should be valid (account expiration). Minimum 1.</summary>
+
+        /// <summary>How many days a privileged (-a) account should be valid. Minimum 1.</summary>
         public int PrivilegedAccountValidityDays { get; set; } = 30;
     }
 
     public interface IPasswordGenerator
     {
-        string GenerateStandard(); // 12, letters+numbers+specials
-        string GenerateAdmin();    // 8, letters+numbers only
+        string GenerateStandard(); // 12 chars: letters + numbers + specials
+        string GenerateAdmin();    // 8 chars: letters + numbers only
     }
 
     public sealed class DefaultPasswordGenerator : IPasswordGenerator
@@ -59,7 +61,9 @@ namespace ADWebManager.Services
             _passwords = passwords ?? new DefaultPasswordGenerator();
         }
 
-        // ------------------------- Public API -------------------------
+        // =====================================================================
+        // Public API
+        // =====================================================================
 
         public CreateUserResult CreateUser(CreateUserRequest req, string caller)
         {
@@ -75,7 +79,7 @@ namespace ADWebManager.Services
             var sam = req.SamAccountName!.Trim();
             var display = ToSentenceCase($"{req.FirstName} {req.LastName}");
 
-            // Create regular account
+            // Regular account
             var stdPass = _passwords.GenerateStandard();
             var (userDn, userOu, _) = CreateAccountInternal(
                 d, sam, display, req, stdPass,
@@ -98,15 +102,15 @@ namespace ADWebManager.Services
                     isPrivileged: true,
                     expireAtLogon: false);
 
-                // Add configured privileged groups
+                // Configured privileged groups
                 if (d.PrivilegedGroups != null)
                     foreach (var g in d.PrivilegedGroups) TryAddToGroup(d, adminSam, g, groupsAdded);
 
-                // Add the user-selected privileged group (if provided)
+                // Selected privileged group (from UI)
                 if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                     TryAddToGroup(d, adminSam, req.SelectedPrivilegedGroupCn!, groupsAdded);
 
-                // Set primary group preference
+                // Primary group rule
                 if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                 {
                     TrySetPrimaryGroup(d, adminSam, req.SelectedPrivilegedGroupCn!);
@@ -140,6 +144,7 @@ namespace ADWebManager.Services
         public void UpdateUser(UpdateUserRequest req, string caller)
         {
             var d = GetDomain(req.Domain);
+
             Require(!string.IsNullOrWhiteSpace(req.SamAccountName), "Username required.");
             Require(!string.IsNullOrWhiteSpace(req.FirstName), "First name required.");
             Require(!string.IsNullOrWhiteSpace(req.LastName), "Last name required.");
@@ -206,7 +211,7 @@ namespace ADWebManager.Services
 
         /// <summary>
         /// Self-service reset: requires DOB match (yyyy-MM-dd) AND last-4 digits of mobile to match.
-        /// Blocks privileged (-a) accounts.
+        /// Blocks privileged (-a) accounts. Enables + unlocks on success.
         /// </summary>
         public async Task SelfServiceResetPasswordAsync(SelfServiceResetRequest req)
         {
@@ -222,24 +227,23 @@ namespace ADWebManager.Services
             var d = GetDomain(req.Domain);
             using var ctx = AdminContext(d);
             var user = FindBySam(ctx, req.SamAccountName!) ?? throw new Exception("Account not found.");
-
             using var de = (DirectoryEntry)user.GetUnderlyingObject();
 
-            // Verify DOB (string match on yyyy-MM-dd)
+            // Verify DOB
             var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
             var storedDob = (de.Properties[dobAttr]?.Value as string)?.Trim();
             var expectedDob = req.Birthdate.Trim();
             if (string.IsNullOrWhiteSpace(storedDob) || !string.Equals(storedDob, expectedDob, StringComparison.Ordinal))
                 throw new Exception("Identity verification failed (DOB).");
 
-            // Verify last-4 of mobile (ENFORCED)
+            // Verify last-4 of mobile
             var storedMobile = (de.Properties["mobile"]?.Value as string) ?? string.Empty;
             var digits = new string(storedMobile.Where(char.IsDigit).ToArray());
             var last4 = digits.Length >= 4 ? digits[^4..] : digits;
             if (string.IsNullOrWhiteSpace(last4) || !string.Equals(last4, req.MobileLast4!.Trim(), StringComparison.Ordinal))
                 throw new Exception("Identity verification failed (mobile).");
 
-            // If we got here, identity is verified: set password, unlock, enable
+            // Set password, unlock & enable
             user.SetPassword(req.NewPassword);
             try { user.UnlockAccount(); } catch { }
             user.Enabled = true;
@@ -248,12 +252,16 @@ namespace ADWebManager.Services
             await Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Returns only users under the configured Users OU (UserOuDn), not the entire domain.
+        /// </summary>
         public IReadOnlyList<UserRow> ListUsers(string domain)
         {
             var d = GetDomain(domain);
             var rows = new List<UserRow>();
 
-            using var de = new DirectoryEntry($"LDAP://{d.LdapBaseDn}", d.ServiceAccountUser, d.ServiceAccountPassword);
+            var searchBase = d.UserOuDn; // <-- IMPORTANT: scope to Users OU
+            using var de = new DirectoryEntry($"LDAP://{searchBase}", d.ServiceAccountUser, d.ServiceAccountPassword);
             using var ds = new DirectorySearcher(de)
             {
                 Filter = "(&(objectCategory=person)(objectClass=user)(!(objectClass=computer)))",
@@ -287,7 +295,8 @@ namespace ADWebManager.Services
                 if (r.Properties["accountExpires"]?.Count > 0)
                 {
                     var exp = (long)r.Properties["accountExpires"][0];
-                    if (exp != 0 && exp != 0x7FFFFFFFFFFFFFFF) expiration = DateTime.FromFileTimeUtc(exp);
+                    if (exp != 0 && exp != 0x7FFFFFFFFFFFFFFF)
+                        expiration = DateTime.FromFileTimeUtc(exp);
                 }
 
                 rows.Add(new UserRow
@@ -304,7 +313,9 @@ namespace ADWebManager.Services
             return rows;
         }
 
-        // ------------------------- Internals -------------------------
+        // =====================================================================
+        // Internals
+        // =====================================================================
 
         private (string dn, string ouUsed, UserPrincipal up) CreateAccountInternal(
             DomainConfig d, string sam, string display, CreateUserRequest req,
@@ -321,8 +332,10 @@ namespace ADWebManager.Services
                 Surname = ToSentenceCase(req.LastName),
                 Enabled = true
             };
+
             if (req.ExpirationDate.HasValue)
                 up.AccountExpirationDate = req.ExpirationDate.Value.ToDateTime(new TimeOnly(0, 0));
+
             up.Save();
 
             using var entry = (DirectoryEntry)up.GetUnderlyingObject();
@@ -335,7 +348,7 @@ namespace ADWebManager.Services
                 entry.MoveTo(newParent);
             }
 
-            // Password & flags
+            // Set password & flags
             up.SetPassword(password);
             up.PasswordNeverExpires = false;
             up.Save();
@@ -372,10 +385,12 @@ namespace ADWebManager.Services
         {
             var d = _opts.Domains.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (d == null) throw new Exception($"Domain '{name}' is not configured.");
+
             Require(!string.IsNullOrWhiteSpace(d.ServiceAccountUser), $"Service account user not set for domain {name}.");
             Require(!string.IsNullOrWhiteSpace(d.ServiceAccountPassword), $"Service account password not set for domain {name}.");
             Require(!string.IsNullOrWhiteSpace(d.LdapBaseDn), $"LDAP base DN not set for domain {name}.");
             Require(!string.IsNullOrWhiteSpace(d.UserOuDn), $"User OU DN not set for domain {name}.");
+
             return d;
         }
 
@@ -399,20 +414,29 @@ namespace ADWebManager.Services
         private static void Require(bool predicate, string message)
         { if (!predicate) throw new Exception(message); }
 
-        // ---- Group helpers ----
+        // ---------------- Group helpers ----------------
+
         private void TryAddToGroup(DomainConfig d, string sam, string groupCn, List<string>? auditList = null)
         {
             try
             {
                 using var ctx = AdminContext(d);
                 var user = FindBySam(ctx, sam); if (user == null) return;
+
                 using var deGroup = new DirectoryEntry($"LDAP://CN={groupCn},{d.GroupsBaseDn}", d.ServiceAccountUser, d.ServiceAccountPassword);
                 using var deUser = (DirectoryEntry)user.GetUnderlyingObject();
+
                 var members = deGroup.Properties["member"];
                 var userDn = (string)deUser.Properties["distinguishedName"].Value;
-                if (!ContainsDn(members, userDn)) { members.Add(userDn); deGroup.CommitChanges(); }
+
+                if (!ContainsDn(members, userDn))
+                {
+                    members.Add(userDn);
+                    deGroup.CommitChanges();
+                }
                 auditList?.Add(groupCn);
-            } catch { /* swallow and continue */ }
+            }
+            catch { /* swallow to keep creation resilient */ }
         }
 
         private void TryRemoveFromGroup(DomainConfig d, string sam, string groupCn)
@@ -421,12 +445,20 @@ namespace ADWebManager.Services
             {
                 using var ctx = AdminContext(d);
                 var user = FindBySam(ctx, sam); if (user == null) return;
+
                 using var deGroup = new DirectoryEntry($"LDAP://CN={groupCn},{d.GroupsBaseDn}", d.ServiceAccountUser, d.ServiceAccountPassword);
                 using var deUser = (DirectoryEntry)user.GetUnderlyingObject();
+
                 var members = deGroup.Properties["member"];
                 var userDn = (string)deUser.Properties["distinguishedName"].Value;
-                if (ContainsDn(members, userDn)) { members.Remove(userDn); deGroup.CommitChanges(); }
-            } catch { }
+
+                if (ContainsDn(members, userDn))
+                {
+                    members.Remove(userDn);
+                    deGroup.CommitChanges();
+                }
+            }
+            catch { }
         }
 
         private void TrySetPrimaryGroup(DomainConfig d, string sam, string primaryGroupCn)
@@ -435,18 +467,28 @@ namespace ADWebManager.Services
             {
                 using var ctx = AdminContext(d);
                 var user = FindBySam(ctx, sam); if (user == null) return;
+
                 using var deUser = (DirectoryEntry)user.GetUnderlyingObject();
                 using var deGroup = new DirectoryEntry($"LDAP://CN={primaryGroupCn},{d.GroupsBaseDn}", d.ServiceAccountUser, d.ServiceAccountPassword);
+
+                // primaryGroupID must be the RID from the group's SID
                 var groupSid = new SecurityIdentifier((byte[])deGroup.Properties["objectSid"].Value, 0);
-                var primaryRid = int.Parse(groupSid.ToString().Split('-')[^1], CultureInfo.InvariantCulture);
-                deUser.Properties["primaryGroupID"].Value = primaryRid;
-                deUser.CommitChanges();
-            } catch { }
+                var sidParts = groupSid.ToString().Split('-');
+                var ridStr = sidParts[^1];
+                if (int.TryParse(ridStr, NumberStyles.None, CultureInfo.InvariantCulture, out var rid))
+                {
+                    deUser.Properties["primaryGroupID"].Value = rid;
+                    deUser.CommitChanges();
+                }
+            }
+            catch { }
         }
 
         private static bool ContainsDn(PropertyValueCollection members, string dn)
         {
-            foreach (var m in members) if (string.Equals(m?.ToString(), dn, StringComparison.OrdinalIgnoreCase)) return true;
+            foreach (var m in members)
+                if (string.Equals(m?.ToString(), dn, StringComparison.OrdinalIgnoreCase))
+                    return true;
             return false;
         }
     }

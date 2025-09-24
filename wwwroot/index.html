@@ -4,68 +4,47 @@
   <meta charset="utf-8"/>
   <title>AD Web Manager — Access Gate</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <!-- Local Bootstrap -->
   <link rel="stylesheet" href="/css/bootstrap.min.css"/>
 </head>
 <body class="bg-white">
-  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container">
-      <span class="navbar-brand">AD Web Manager</span>
-    </div>
-  </nav>
-
   <main class="container py-5">
     <div class="row justify-content-center">
       <div class="col-lg-8">
-        <div class="alert alert-warning">
-          <strong>Warning:</strong> access to this page is strictly monitored. If you accessed this page by mistake,
-          please close your browser. Click <em>Proceed</em> to accept the site terms and conditions.
+        <div id="warningCard" class="card shadow-sm">
+          <div class="card-body">
+            <div class="alert alert-warning mb-4">
+              <strong>Warning:</strong> access to this page is strictly monitored.
+              Close your browser if you accessed this by mistake. Click Proceed to continue.
+            </div>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="acceptCheck">
+              <label class="form-check-label" for="acceptCheck">I accept the terms and conditions.</label>
+            </div>
+            <div class="text-end">
+              <button id="proceedBtn" class="btn btn-primary" disabled>Proceed</button>
+            </div>
+          </div>
         </div>
-
-        <div class="card shadow-sm">
+        <div id="actionCard" class="card shadow-sm d-none mt-4">
           <div class="card-body">
             <h5 class="card-title mb-3">What do you want to do today?</h5>
-            <p class="text-muted">Choose an action below.</p>
-
             <div class="d-grid gap-3 d-sm-flex">
               <a class="btn btn-primary" href="/admin/index.html">Create / Manage Users (Admin)</a>
               <a class="btn btn-outline-primary" href="/selfservice/index.html">Reset My Password (Self-Service)</a>
             </div>
-
-            <hr class="my-4">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" value="" id="acceptCheck">
-              <label class="form-check-label" for="acceptCheck">
-                I accept the site terms and conditions.
-              </label>
-            </div>
-          </div>
-          <div class="card-footer text-end">
-            <button id="proceedBtn" class="btn btn-primary" disabled>Proceed</button>
           </div>
         </div>
-
       </div>
     </div>
   </main>
-
-  <footer class="border-top py-4">
-    <div class="container text-center text-muted">
-      &copy; 2025 ADWebManager. All access is logged.
-    </div>
-  </footer>
-
-  <!-- Local Bootstrap JS -->
   <script src="/js/bootstrap.bundle.min.js"></script>
   <script>
     const chk = document.getElementById('acceptCheck');
     const btn = document.getElementById('proceedBtn');
-    chk.addEventListener('change', () => btn.disabled = !chk.checked);
-    btn.addEventListener('click', () => {
-      // If desired, store acceptance flag in sessionStorage/localStorage
-      sessionStorage.setItem('adwm.accepted', '1');
-      // Stay on this page — buttons above go to admin/selfservice
-    });
+    const warn = document.getElementById('warningCard');
+    const act = document.getElementById('actionCard');
+    chk.addEventListener('change',()=>btn.disabled=!chk.checked);
+    btn.addEventListener('click',()=>{warn.classList.add('d-none');act.classList.remove('d-none');});
   </script>
 </body>
 </html>
