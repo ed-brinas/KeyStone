@@ -95,18 +95,15 @@ namespace ADWebManager.Services
             user.Save();
             using var deUser = (DirectoryEntry)user.GetUnderlyingObject();
 
-            // Move to OU
             var userOu = ExpandOu(_cfg.Provisioning.DefaultUserOuFormat, req.Domain);
             MoveToOu(deUser, userOu);
 
-            // Password & force change
             var stdPass = _pw.GenerateStandard();
             user.SetPassword(stdPass);
             user.PasswordNeverExpires = false;
             user.ExpirePasswordNow();
             user.Save();
 
-            // Attributes
             var dobAttr = string.IsNullOrWhiteSpace(_cfg.BirthdateAttribute) ? "extensionAttribute1" : _cfg.BirthdateAttribute;
             if (req.Birthdate.HasValue)
                 deUser.Properties[dobAttr].Value = req.Birthdate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -114,17 +111,9 @@ namespace ADWebManager.Services
                 deUser.Properties["mobile"].Value = req.MobileNumber;
             deUser.CommitChanges();
 
-            // Track groups actually added
             var groupsAdded = new List<string>();
-
-            // Add to general access groups
-            foreach (var groupCn in req.SelectedGeneralAccessGroups)
-            {
-                TryAddToGroup(req.Domain, sam, groupCn, groupsAdded);
-            }
-
-            // Privileged (-a) optional
             string? adminPass = null;
+
             if (req.CreatePrivileged)
             {
                 var adminSam = sam + "-a";
@@ -144,24 +133,18 @@ namespace ADWebManager.Services
 
                 adminPass = _pw.GenerateAdmin();
                 admin.SetPassword(adminPass);
-                admin.PasswordNeverExpires = false; // no immediate expiration
+                admin.PasswordNeverExpires = false;
                 admin.Save();
 
-                // Add to selected privileged groups
-                foreach(var groupCn in req.SelectedPrivilegeAccessGroups)
-                {
-                    TryAddToGroup(req.Domain, adminSam, groupCn, groupsAdded);
-                }
+                if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
+                    TryAddToGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn, groupsAdded);
 
-                // If requested and only one group is selected, set as primary and remove Domain Users
-                if (req.MakeSelectedPrimary && req.SelectedPrivilegeAccessGroups.Length == 1)
+                if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                 {
-                    var primaryGroupCn = req.SelectedPrivilegeAccessGroups[0];
-                    TrySetPrimaryGroup(req.Domain, adminSam, primaryGroupCn);
+                    TrySetPrimaryGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn);
                     TryRemoveFromGroup(req.Domain, adminSam, "Domain Users");
                 }
 
-                // Apply validity window for -a
                 var days = Math.Max(1, _cfg.PrivilegedAccountValidityDays);
                 admin.AccountExpirationDate = DateTime.UtcNow.AddDays(days);
                 admin.Save();
@@ -185,27 +168,35 @@ namespace ADWebManager.Services
                 GroupsAdded = groupsAdded.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             };
         }
-        
+
         public UserDetails GetUserDetails(string domain, string sam)
         {
             using var ctx = AdminContext(domain);
             var user = FindBySam(ctx, sam) ?? throw new Exception("User not found.");
-
             using var de = (DirectoryEntry)user.GetUnderlyingObject();
+
             var dobAttr = string.IsNullOrWhiteSpace(_cfg.BirthdateAttribute) ? "extensionAttribute1" : _cfg.BirthdateAttribute;
-            
+            var dobString = de.Properties[dobAttr]?.Value as string;
+            DateOnly? birthdate = null;
+            if (DateOnly.TryParse(dobString, out var dob))
+            {
+                birthdate = dob;
+            }
+
             return new UserDetails
             {
                 Domain = domain,
                 SamAccountName = user.SamAccountName,
+                DisplayName = user.DisplayName,
                 FirstName = user.GivenName,
                 LastName = user.Surname,
-                MobileNumber = de.Properties["mobile"]?.Value as string,
-                Birthdate = de.Properties[dobAttr]?.Value as string,
-                ExpirationDate = user.AccountExpirationDate
+                Enabled = user.Enabled ?? false,
+                IsLocked = user.IsAccountLockedOut(),
+                ExpirationDate = user.AccountExpirationDate,
+                Birthdate = birthdate,
+                MobileNumber = de.Properties["mobile"]?.Value as string
             };
         }
-
 
         public void UpdateUser(UpdateUserRequest req, string caller)
         {
@@ -233,23 +224,6 @@ namespace ADWebManager.Services
             de.CommitChanges();
         }
 
-        public void UnlockAccount(string domain, string sam)
-        {
-            using var ctx = AdminContext(domain);
-            var user = FindBySam(ctx, sam) ?? throw new Exception("User not found.");
-            try { user.UnlockAccount(); } catch { }
-            user.Save();
-        }
-
-        public void SetEnabled(string domain, string sam, bool enable)
-        {
-            using var ctx = AdminContext(domain);
-            var user = FindBySam(ctx, sam) ?? throw new Exception("User not found.");
-            user.Enabled = enable;
-            user.Save();
-        }
-
-        // Generate a compliant password (Standard vs Admin based on "-a")
         public string ResetPassword(string domain, string sam, bool unlock)
         {
             using var ctx = AdminContext(domain);
@@ -263,7 +237,6 @@ namespace ADWebManager.Services
             return newPass;
         }
 
-        // Set an explicit password (already validated by caller)
         public void SetPassword(string domain, string sam, string newPassword, bool unlock)
         {
             using var ctx = AdminContext(domain);
@@ -300,65 +273,7 @@ namespace ADWebManager.Services
             user.Save();
             await Task.CompletedTask;
         }
-
-        public IReadOnlyList<UserRow> ListUsers(string domain)
-        {
-            var results = new List<UserRow>();
-            foreach (var baseOuFmt in _cfg.Provisioning.SearchBaseOus)
-            {
-                var baseOu = ExpandOu(baseOuFmt, domain);
-                using var de = new DirectoryEntry($"LDAP://{baseOu}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
-                using var ds = new DirectorySearcher(de)
-                {
-                    Filter = "(&(objectCategory=person)(objectClass=user)(!(objectClass=computer)))",
-                    PageSize = 500,
-                    SearchScope = SearchScope.Subtree
-                };
-                ds.PropertiesToLoad.AddRange(new[] { "samAccountName", "displayName", "userAccountControl", "lockoutTime", "accountExpires" });
-
-                foreach (SearchResult r in ds.FindAll())
-                {
-                    var sam = r.Properties["samAccountName"]?.Count > 0 ? (string)r.Properties["samAccountName"][0] : null;
-                    if (string.IsNullOrWhiteSpace(sam)) continue;
-                    var display = r.Properties["displayName"]?.Count > 0 ? (string)r.Properties["displayName"][0] : sam;
-
-                    bool enabled = true;
-                    if (r.Properties["userAccountControl"]?.Count > 0)
-                    {
-                        var uac = (int)r.Properties["userAccountControl"][0];
-                        enabled = (uac & 0x2) == 0;
-                    }
-
-                    bool isLocked = false;
-                    if (r.Properties["lockoutTime"]?.Count > 0)
-                    {
-                        var val = (long)r.Properties["lockoutTime"][0];
-                        isLocked = val != 0;
-                    }
-
-                    DateTime? expiration = null;
-                    if (r.Properties["accountExpires"]?.Count > 0)
-                    {
-                        var exp = (long)r.Properties["accountExpires"][0];
-                        if (exp != 0 && exp != 0x7FFFFFFFFFFFFFFF)
-                            expiration = DateTime.FromFileTimeUtc(exp);
-                    }
-
-                    results.Add(new UserRow
-                    {
-                        Domain = domain,
-                        SamAccountName = sam,
-                        DisplayName = display,
-                        Enabled = enabled,
-                        IsLocked = isLocked,
-                        ExpirationDate = expiration,
-                        IsPrivileged = sam.EndsWith("-a", StringComparison.OrdinalIgnoreCase)
-                    });
-                }
-            }
-            return results;
-        }
-
+        
         private PrincipalContext AdminContext(string domain) =>
             new PrincipalContext(ContextType.Domain, domain, _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
 
@@ -449,3 +364,4 @@ namespace ADWebManager.Services
         }
     }
 }
+
