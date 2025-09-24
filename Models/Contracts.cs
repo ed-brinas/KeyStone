@@ -15,6 +15,10 @@ namespace ADWebManager.Models
         public string[]? StandardGroups { get; set; }
         public string[]? PrivilegedGroups { get; set; }      // candidate privileged groups for UI
         public string? PrivilegedPrimaryGroup { get; set; }  // fallback if UI doesn't choose
+
+        // New properties for optional groups
+        public string[]? OptionalGeneralAccessGroup { get; set; }
+        public string[]? OptionalPrivilegeGroup { get; set; }
     }
 
     public class CreateUserRequest
@@ -31,6 +35,10 @@ namespace ADWebManager.Models
         // NEW: privileged group selection at creation time
         public string? SelectedPrivilegedGroupCn { get; set; } // e.g. "Domain Admins"
         public bool MakeSelectedPrimary { get; set; } = false; // if true and -a is created, set as primary
+
+        // New properties for multi-group selection
+        public string[]? SelectedGeneralAccessGroups { get; set; }
+        public string[]? SelectedPrivilegeAccessGroups { get; set; }
     }
 
     public class UpdateUserRequest

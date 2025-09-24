@@ -46,6 +46,7 @@ async function populateDomains() {
   $('#c_domain').html(opts(domains));
   $('#u_domain').html(opts(domains, true)).on('change', loadUsers);
 }
+
 async function loadPrivilegedGroupsFor(domain) {
   $('#c_priv_group').empty();
   if (!domain) return;
@@ -62,6 +63,26 @@ async function loadPrivilegedGroupsFor(domain) {
   }
 }
 
+async function loadOptionalGroups(domain) {
+    $('#c_general_groups').empty();
+    $('#c_priv_groups').empty();
+    if (!domain) return;
+    try {
+        // This assumes a new API endpoint exists to provide these lists.
+        const data = await api('/api/config/optional-groups?domain=' + encodeURIComponent(domain));
+        if (data.optionalGeneralAccessGroup && Array.isArray(data.optionalGeneralAccessGroup)) {
+            data.optionalGeneralAccessGroup.forEach(g => $('#c_general_groups').append(`<option value="${g}">${g}</option>`));
+        }
+        if (data.optionalPrivilegeGroup && Array.isArray(data.optionalPrivilegeGroup)) {
+            data.optionalPrivilegeGroup.forEach(g => $('#c_priv_groups').append(`<option value="${g}">${g}</option>`));
+        }
+    } catch (err) {
+        console.error("Failed to load optional groups:", err);
+        showInfo('Error', 'Could not load optional groups. Please check the application configuration and logs.');
+    }
+}
+
+
 // -------- Users grid --------
 async function loadUsers(){
   const data = await api('/api/admin/users');
@@ -69,7 +90,6 @@ async function loadUsers(){
   const domFilter = ($('#u_domain').val() || '');
   const tbody = $('#users tbody').empty();
 
-  // Build set of base users that have -a accounts
   const adminBaseSet = new Set(
     data
       .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
@@ -160,7 +180,10 @@ async function loadUsers(){
 // -------- Form helpers --------
 function formDataOrInvalid() {
   const form = document.getElementById('userForm');
-  if (!form.checkValidity()) { form.classList.add('was-validated'); return null; }
+  if (!form.checkValidity()) {
+    form.classList.add('was-validated');
+    return null;
+  }
   return {
     domain: $('#c_domain').val(),
     firstName: $('#c_fn').val(),
@@ -171,7 +194,9 @@ function formDataOrInvalid() {
     samAccountName: $('#c_sam').val(),
     createPrivileged: $('#c_priv').is(':checked'),
     selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,
-    makeSelectedPrimary: $('#c_priv_primary').is(':checked')
+    makeSelectedPrimary: $('#c_priv_primary').is(':checked'),
+    selectedGeneralAccessGroups: $('#c_general_groups').val() || [],
+    selectedPrivilegeAccessGroups: $('#c_priv_groups').val() || []
   };
 }
 
@@ -229,36 +254,45 @@ $('#create').click(async ()=>{
   const payload = await api('/api/admin/create-user','POST', body);
   openCreatedSummaryModal(payload);
   loadUsers();
+  // Optionally close and reset the form
+  bootstrap.Modal.getInstance(document.getElementById('userFormModal')).hide();
+  document.getElementById('userForm').classList.remove('was-validated');
+  document.getElementById('userForm').reset();
+  $('#privileged-options').hide();
 });
-$('#update').click(async ()=>{
-  const body = formDataOrInvalid();
-  if (!body) return;
-  const ok = await confirmAction('Update User', `Update account <code>${body.samAccountName}</code>?`);
-  if (!ok) return;
-  await api('/api/admin/update-user','POST', body);
-  showInfo('Updated', `Account <code>${body.samAccountName}</code> has been updated.`);
-  loadUsers();
-});
+
 $('#loadLogs').click(async ()=>{ const r = await api('/api/admin/logs'); $('#logs').text(r.entries.join('\n')); });
 $('#refresh').click(loadUsers);
 $('#q').on('input', loadUsers);
 document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
 document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
 
-// React to domain change for privileged groups (and maybe reload users)
+// -------- Wire up form element events --------
+
+// React to domain change to load relevant groups
 $('#c_domain').on('change', function(){
-  loadPrivilegedGroupsFor(this.value);
+  const domain = this.value;
+  loadPrivilegedGroupsFor(domain);
+  loadOptionalGroups(domain);
 });
+
+// Show/hide privileged options based on checkbox
+$('#c_priv').on('change', function() {
+    $('#privileged-options').toggle(this.checked);
+});
+
 
 // -------- Init --------
 (async () => {
   try { await bootstrapSession(); } catch {}
   await populateDomains();
-  // Preload privileged groups for initial domain in form modal
-  const d = $('#c_domain').val();
-  await loadPrivilegedGroupsFor(d);
+  
+  // Preload groups for the initial domain selected in the form
+  const initialDomain = $('#c_domain').val();
+  if (initialDomain) {
+      await loadPrivilegedGroupsFor(initialDomain);
+      await loadOptionalGroups(initialDomain);
+  }
+  
   await loadUsers();
-
-  // Optional: open the Create modal on first visit if desired
-  // new bootstrap.Modal(document.getElementById('userFormModal')).show();
 })();
