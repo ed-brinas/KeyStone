@@ -114,8 +114,14 @@ namespace ADWebManager.Services
                 deUser.Properties["mobile"].Value = req.MobileNumber;
             deUser.CommitChanges();
 
-            // Track groups actually added (privileged path only)
+            // Track groups actually added
             var groupsAdded = new List<string>();
+
+            // Add to general access groups
+            foreach (var groupCn in req.SelectedGeneralAccessGroups)
+            {
+                TryAddToGroup(req.Domain, sam, groupCn, groupsAdded);
+            }
 
             // Privileged (-a) optional
             string? adminPass = null;
@@ -141,14 +147,17 @@ namespace ADWebManager.Services
                 admin.PasswordNeverExpires = false; // no immediate expiration
                 admin.Save();
 
-                // Single selected privileged group from request (SelectedPrivilegedGroupCn)
-                if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
-                    TryAddToGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn, groupsAdded);
-
-                // If requested, set selected privileged group as primary and remove Domain Users
-                if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
+                // Add to selected privileged groups
+                foreach(var groupCn in req.SelectedPrivilegeAccessGroups)
                 {
-                    TrySetPrimaryGroup(req.Domain, adminSam, req.SelectedPrivilegedGroupCn);
+                    TryAddToGroup(req.Domain, adminSam, groupCn, groupsAdded);
+                }
+
+                // If requested and only one group is selected, set as primary and remove Domain Users
+                if (req.MakeSelectedPrimary && req.SelectedPrivilegeAccessGroups.Length == 1)
+                {
+                    var primaryGroupCn = req.SelectedPrivilegeAccessGroups[0];
+                    TrySetPrimaryGroup(req.Domain, adminSam, primaryGroupCn);
                     TryRemoveFromGroup(req.Domain, adminSam, "Domain Users");
                 }
 
@@ -176,6 +185,27 @@ namespace ADWebManager.Services
                 GroupsAdded = groupsAdded.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             };
         }
+        
+        public UserDetails GetUserDetails(string domain, string sam)
+        {
+            using var ctx = AdminContext(domain);
+            var user = FindBySam(ctx, sam) ?? throw new Exception("User not found.");
+
+            using var de = (DirectoryEntry)user.GetUnderlyingObject();
+            var dobAttr = string.IsNullOrWhiteSpace(_cfg.BirthdateAttribute) ? "extensionAttribute1" : _cfg.BirthdateAttribute;
+            
+            return new UserDetails
+            {
+                Domain = domain,
+                SamAccountName = user.SamAccountName,
+                FirstName = user.GivenName,
+                LastName = user.Surname,
+                MobileNumber = de.Properties["mobile"]?.Value as string,
+                Birthdate = de.Properties[dobAttr]?.Value as string,
+                ExpirationDate = user.AccountExpirationDate
+            };
+        }
+
 
         public void UpdateUser(UpdateUserRequest req, string caller)
         {

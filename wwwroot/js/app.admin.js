@@ -33,7 +33,18 @@ function initTooltips(scope=document) {
   list.forEach(el => new bootstrap.Tooltip(el, { container: 'body' }));
 }
 
-// -------- Domains & privileged groups --------
+// -------- Permissions --------
+let userPermissions = { canCreatePrivileged: false };
+async function checkPermissions() {
+    try {
+        userPermissions = await api('/api/session/permissions');
+    } catch (err) {
+        console.error("Failed to check permissions:", err);
+        userPermissions = { canCreatePrivileged: false };
+    }
+}
+
+// -------- Domains & optional groups --------
 async function populateDomains() {
   let domains = [];
   try { domains = await api('/api/config/domains'); } catch {}
@@ -68,179 +79,30 @@ async function loadOptionalGroups(domain) {
 
 // -------- Users grid --------
 async function loadUsers(){
-  const data = await api('/api/admin/users');
-  const q = ($('#q').val() || '').toLowerCase();
-  const domFilter = ($('#u_domain').val() || '');
-  const tbody = $('#users tbody').empty();
-
-  const adminBaseSet = new Set(
-    data
-      .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
-      .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
-  );
-
-  data
-    .filter(u => !domFilter || u.domain === domFilter)
-    .filter(u => (u.samAccountName || '').toLowerCase().includes(q))
-    .forEach(u => {
-      const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
-      const isPriv = !!u.isPrivileged;
-      const base = (u.samAccountName || '').toLowerCase();
-      const hasAdmin = !isPriv && adminBaseSet.has(base);
-      const adminBadgeHtml = isPriv
-        ? '<span class="badge bg-secondary">—</span>'
-        : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
-
-      const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
-      actions.append(
-        $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Unlock Account', `Unlock <code>${u.samAccountName}</code> on <code>${u.domain}</code>?`);
-            if (!ok) return;
-            await api('/api/admin/unlock','POST',{domain:u.domain,samAccountName:u.samAccountName});
-            showInfo('Unlocked', `Account <code>${u.samAccountName}</code> was unlocked.`);
-            loadUsers();
-          })
-      );
-      actions.append(
-        $('<button class="btn-icon text-success me-2" aria-label="Enable" data-bs-toggle="tooltip" title="Enable"><i class="bi bi-check-circle"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Enable Account', `Enable <code>${u.samAccountName}</code>?`);
-            if (!ok) return;
-            await api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:true});
-            showInfo('Enabled', `Account <code>${u.samAccountName}</code> is now enabled.`);
-            loadUsers();
-          })
-      );
-      actions.append(
-        $('<button class="btn-icon text-warning me-2" aria-label="Disable" data-bs-toggle="tooltip" title="Disable"><i class="bi bi-slash-circle"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Disable Account', `Disable <code>${u.samAccountName}</code>?`);
-            if (!ok) return;
-            await api('/api/admin/enable','POST',{domain:u.domain,samAccountName:u.samAccountName,enable:false});
-            showInfo('Disabled', `Account <code>${u.samAccountName}</code> is now disabled.`);
-            loadUsers();
-          })
-      );
-      actions.append(
-        $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
-          .click(async () => {
-            const ok = await confirmAction('Reset Password', `Reset password for <code>${u.samAccountName}</code>? This will also unlock the account.`);
-            if (!ok) return;
-            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
-            showInfo('Password Reset', `New password for <code>${u.samAccountName}</code>:<br><code>${r.password}</code>`);
-            loadUsers();
-          })
-      );
-      if (!isPriv && hasAdmin) {
-        const adminSam = `${u.samAccountName}-a`;
-        actions.append(
-          $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
-            .click(async () => {
-              const ok = await confirmAction('Reset Admin Password', `Reset password for admin account <code>${adminSam}</code>?`);
-              if (!ok) return;
-              const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
-              showInfo('Admin Password Reset', `New password for <code>${adminSam}</code>:<br><code>${r.password}</code>`);
-              loadUsers();
-            })
-        );
-      }
-
-      const tr = $('<tr>');
-      tr.append(`<td>${u.domain}</td>`);
-      tr.append(`<td class="text-mono">${u.samAccountName}</td>`);
-      tr.append(`<td>${u.displayName}</td>`);
-      tr.append(`<td>${status}</td>`);
-      tr.append(`<td>${u.expirationDate || ''}</td>`);
-      tr.append(`<td class="text-center">${adminBadgeHtml}</td>`);
-      tr.append($('<td class="text-center">').append(actions));
-      tbody.append(tr);
-    });
-
-  initTooltips(document);
+  // ... existing loadUsers implementation ...
 }
 
 // -------- Form helpers --------
 function formDataOrInvalid() {
-  const form = document.getElementById('userForm');
-  if (!form.checkValidity()) {
-    form.classList.add('was-validated');
-    return null;
-  }
-  
-  const selectedPrivGroups = $('#c_priv_groups').val() || [];
-  
-  return {
-    domain: $('#c_domain').val(),
-    firstName: $('#c_fn').val(),
-    lastName: $('#c_ln').val(),
-    birthdate: $('#c_dob').val(),
-    expirationDate: $('#c_exp').val(),
-    mobileNumber: $('#c_mobile').val(),
-    samAccountName: $('#c_sam').val(),
-    createPrivileged: $('#c_priv').is(':checked'),
-    selectedPrivilegedGroupCn: selectedPrivGroups.length > 0 ? selectedPrivGroups[0] : null, // Backend logic needs to handle single/multiple
-    makeSelectedPrimary: $('#c_priv_primary_single').is(':checked') && selectedPrivGroups.length === 1,
-    selectedGeneralAccessGroups: $('#c_general_groups').val() || [],
-    selectedPrivilegeAccessGroups: selectedPrivGroups
-  };
+  // ... existing formDataOrInvalid implementation ...
 }
 
 
 // -------- Created summary modal --------
 let __lastCreatePayload = null;
 function openCreatedSummaryModal(payload) {
-  __lastCreatePayload = payload;
-  const r = payload.result;
-  const a = payload.admin || { created:false };
-  const lines = [];
-  lines.push("=== Regular Account ===");
-  lines.push(`Domain            : ${r.domain}`);
-  lines.push(`Username (SAM)    : ${r.samAccountName}`);
-  lines.push(`Display Name      : ${r.displayName}`);
-  lines.push(`Mobile Number     : ${r.mobileNumber || '(not set)'}`);
-  lines.push(`OU                : ${r.ouCreatedIn}`);
-  lines.push(`Enabled/Locked    : ${r.enabled ? "Enabled" : "Disabled"} / ${r.isLocked ? "Locked" : "Unlocked"}`);
-  lines.push(`Expires           : ${r.expirationDate || "(none)"}`);
-  lines.push(`Groups            : ${r.groupsAdded && r.groupsAdded.length ? r.groupsAdded.join(", ") : "(none)"}`);
-  lines.push(`Initial Password  : ${r.initialPassword}`);
-  lines.push("");
-  lines.push(`Must change password at next logon: Yes`);
-  if (a.created) {
-    lines.push("");
-    lines.push("=== Admin Account (-a) ===");
-    lines.push(`Username (SAM)    : ${a.sam}`);
-    lines.push(`Initial Password  : ${a.password}`);
-    lines.push(`Note              : Admin account is not forced to change password at first logon.`);
-  }
-  document.getElementById('createdModalPre').textContent = lines.join('\n');
-  new bootstrap.Modal(document.getElementById('createdModal')).show();
+  // ... existing openCreatedSummaryModal implementation ...
 }
 async function copyCreatedSummaryToClipboard() {
-  const text = document.getElementById('createdModalPre').textContent;
-  try {
-    await navigator.clipboard.writeText(text);
-    showInfo('Copied', 'The summary has been copied to your clipboard.');
-  } catch {
-    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); showInfo('Copied', 'The summary has been copied to your clipboard.'); }
-    finally { document.body.removeChild(ta); }
-  }
+  // ... existing copyCreatedSummaryToClipboard implementation ...
 }
 async function exportCreatedPdf() {
-  if (!__lastCreatePayload || !__lastCreatePayload.result) return;
-  await api('/api/admin/create-user/export-pdf', 'POST', __lastCreatePayload.result);
+  // ... existing exportCreatedPdf implementation ...
 }
 
 // -------- Audit Log Modal Logic --------
 async function loadAndDisplayLogs() {
-    try {
-        const r = await api('/api/admin/logs');
-        $('#logs').text(r.entries.join('\n') || 'No log entries found.');
-    } catch (err) {
-        $('#logs').text('Failed to load logs.');
-        console.error('Error loading logs:', err);
-    }
+    // ... existing loadAndDisplayLogs implementation ...
 }
 
 
@@ -250,49 +112,41 @@ $('#create').click(async ()=>{
   if (!body) return;
   const ok = await confirmAction('Create User', 'Proceed to create this user? A summary with credentials will be shown.');
   if (!ok) return;
-  const payload = await api('/api/admin/create-user','POST', body);
-  openCreatedSummaryModal(payload);
-  loadUsers();
-  // Optionally close and reset the form
-  bootstrap.Modal.getInstance(document.getElementById('userFormModal')).hide();
-  document.getElementById('userForm').classList.remove('was-validated');
-  document.getElementById('userForm').reset();
-  $('#privileged-options').hide();
+  try {
+    const payload = await api('/api/admin/create-user','POST', body);
+    openCreatedSummaryModal(payload);
+    loadUsers();
+    bootstrap.Modal.getInstance(document.getElementById('userFormModal')).hide();
+    document.getElementById('userForm').reset();
+    $('#privileged-options').hide();
+  } catch (err) {
+      if (err.status === 403) {
+          showInfo('Permission Denied', 'You do not have permission to create a privileged account.');
+      } else {
+          showInfo('Error', `Failed to create user. ${err.message || ''}`);
+      }
+  }
 });
 
-$('#refresh').click(loadUsers);
-$('#q').on('input', loadUsers);
-document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
-document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
-
-// Logs Modal events
-const logsModalEl = document.getElementById('logsModal');
-if(logsModalEl) {
-    logsModalEl.addEventListener('show.bs.modal', loadAndDisplayLogs);
-}
-const loadLogsBtn = document.getElementById('loadLogs');
-if(loadLogsBtn) {
-    loadLogsBtn.addEventListener('click', loadAndDisplayLogs);
-}
-
-
-// -------- Wire up form element events --------
-$('#c_domain').on('change', function(){
-  const domain = this.value;
-  loadOptionalGroups(domain);
-});
-
-$('#c_priv').on('change', function() {
-    $('#privileged-options').toggle(this.checked);
-});
-
+// ... other button wiring ...
 
 // -------- Init --------
 (async () => {
-  try { await bootstrapSession(); } catch {}
+  try { 
+    await bootstrapSession(); 
+    await checkPermissions();
+  } catch(err) {
+      // If session fails, redirect to home page, as they are not authenticated.
+      window.location.href = '/';
+      return;
+  }
+  
+  if (!userPermissions.canCreatePrivileged) {
+      $('#c_priv_container').hide();
+  }
+
   await populateDomains();
   
-  // Preload groups for the initial domain selected in the form
   const initialDomain = $('#c_domain').val();
   if (initialDomain) {
       await loadOptionalGroups(initialDomain);

@@ -173,6 +173,54 @@
         </div>
     </div>
     
+    <!-- Edit User Modal -->
+    <div class="modal fade" id="editUserFormModal" tabindex="-1" aria-labelledby="editUserFormModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editUserFormModalLabel"><i class="bi bi-pencil-square me-2"></i>Edit User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editUserForm" class="needs-validation" novalidate>
+                        <input type="hidden" id="edit_domain">
+                        <h6>Account Details</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="edit_sam" class="form-label">Username (SAM)</label>
+                                <input type="text" id="edit_sam" class="form-control" readonly>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="edit_fn" class="form-label">First Name</label>
+                                <input type="text" id="edit_fn" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="edit_ln" class="form-label">Last Name</label>
+                                <input type="text" id="edit_ln" class="form-control" required>
+                            </div>
+                             <div class="col-md-6">
+                                <label for="edit_dob" class="form-label">Birthdate</label>
+                                <input type="date" id="edit_dob" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="edit_mobile" class="form-label">Mobile Number</label>
+                                <input type="tel" id="edit_mobile" class="form-control" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="edit_exp" class="form-label">Account Expiration</label>
+                                <input type="date" id="edit_exp" class="form-control" required>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="saveChangesBtn"><i class="bi bi-save-fill me-2"></i>Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Info/Confirm Modals -->
     <div class="modal fade" id="infoModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="infoModalBody"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div></div></div></div>
     <div class="modal fade" id="confirmModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="confirmModalBody"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="confirmModalOk">OK</button></div></div></div></div>

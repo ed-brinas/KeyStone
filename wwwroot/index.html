@@ -8,54 +8,56 @@
     <link href="css/bootstrap-icons.css" rel="stylesheet">
     <link href="css/style.css" rel="stylesheet">
 </head>
-<body class="d-flex flex-column min-vh-100">
+<body class="d-flex flex-column min-vh-100 bg-light">
 
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
         <div class="container">
-            <a class="navbar-brand" href="/">
+            <a class="navbar-brand" href="#">
                 <i class="bi bi-key-fill"></i> KeyStone AD Manager
             </a>
         </div>
     </nav>
 
-    <main class="flex-grow-1">
-        <div class="container mt-5">
-            <div class="p-5 mb-4 bg-light rounded-3">
-                <div class="container-fluid py-5">
-                    <h1 class="display-5 fw-bold">Active Directory Web Manager</h1>
-                    <p class="col-md-8 fs-4">Welcome to KeyStone, a tool for managing Active Directory users and services. Please select one of the portals below to get started.</p>
-                </div>
-            </div>
-
-            <div class="row align-items-md-stretch">
-                <div class="col-md-6 mb-4">
-                    <div class="h-100 p-5 text-white bg-dark rounded-3 card-hover">
-                        <h2><i class="bi bi-shield-lock"></i> Admin Portal</h2>
-                        <p>Manage users, reset passwords, and perform other administrative tasks. Requires authorized access.</p>
-                        <a class="btn btn-outline-light" href="/admin/" type="button">Go to Admin Portal <i class="bi bi-arrow-right-circle"></i></a>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-4">
-                    <div class="h-100 p-5 bg-light border rounded-3 card-hover">
-                        <h2><i class="bi bi-person-circle"></i> Self-Service Portal</h2>
-                        <p>Unlock your account or reset your password using your registered information.</p>
-                        <a class="btn btn-outline-secondary" href="/selfservice/" type="button">Go to Self-Service <i class="bi bi-arrow-right-circle"></i></a>
+    <main class="flex-grow-1 container my-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8 text-center">
+                <div class="lc-block mb-4">
+                    <div editable="rich">
+                        <h1 class="display-3 fw-bold">Welcome to KeyStone</h1>
+                        <p class="lead">Your central hub for Active Directory management.</p>
                     </div>
                 </div>
             </div>
         </div>
+        <div class="row justify-content-center g-4">
+            <div class="col-md-5">
+                <a href="/admin/" class="card text-decoration-none card-hover h-100">
+                    <div class="card-body text-center p-4">
+                        <i class="bi bi-person-badge-fill display-2 text-primary"></i>
+                        <h3 class="card-title mt-3">Admin Portal</h3>
+                        <p class="card-text">Manage users, reset passwords, and oversee Active Directory accounts.</p>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-5">
+                <a href="/selfservice/" class="card text-decoration-none card-hover h-100">
+                    <div class="card-body text-center p-4">
+                        <i class="bi bi-person-lock display-2 text-primary"></i>
+                        <h3 class="card-title mt-3">Self-Service Reset</h3>
+                        <p class="card-text">Allows end-users to securely reset their own passwords.</p>
+                    </div>
+                </a>
+            </div>
+        </div>
     </main>
 
-    <footer class="footer mt-auto py-3 bg-dark text-white text-center">
+    <footer class="footer mt-auto py-3 bg-primary text-white text-center">
         <div class="container">
             <span>&copy; 2024 KeyStone AD Web Manager</span>
         </div>
     </footer>
 
-    <script src="js/jquery.min.js"></script>
     <script src="js/bootstrap.bundle.min.js"></script>
-    <script src="js/app.js"></script>
-    <script src="js/app.landing.js"></script>
-
 </body>
 </html>
+

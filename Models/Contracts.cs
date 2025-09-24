@@ -1,93 +1,69 @@
-using System;
+namespace ADWebManager.Models;
 
-namespace ADWebManager.Models
+// ---------- Self-Service ----------
+public record SelfServiceResetRequest(string Domain, string SamAccountName, string Birthdate, string MobileLast4, string NewPassword);
+
+// ---------- Admin - User Management ----------
+public record CreateUserRequest(
+    string Domain,
+    string SamAccountName,
+    string FirstName,
+    string LastName,
+    DateOnly? Birthdate,
+    DateOnly? ExpirationDate,
+    string MobileNumber,
+    bool CreatePrivileged,
+    string? SelectedPrivilegedGroupCn,
+    bool MakeSelectedPrimary,
+    string[] SelectedGeneralAccessGroups,
+    string[] SelectedPrivilegeAccessGroups
+);
+
+public record CreateUserResult
 {
-    public class DomainConfig
-    {
-        public string Name { get; set; } = "";
-        public string LdapBaseDn { get; set; } = "";
-        public string UserOuDn { get; set; } = "";
-        public string AdminOuDn { get; set; } = "";
-        public string GroupsBaseDn { get; set; } = "";
-        public string ServiceAccountUser { get; set; } = "";
-        public string ServiceAccountPassword { get; set; } = "";
+    public string Domain { get; set; } = string.Empty;
+    public string SamAccountName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string DistinguishedName { get; set; } = string.Empty;
+    public string OuCreatedIn { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public bool IsLocked { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public string? MobileNumber { get; set; }
+    public string InitialPassword { get; set; } = string.Empty;
+    public string? AdminInitialPassword { get; set; }
+    public bool HasPrivileged { get; set; }
+    public string[]? GroupsAdded { get; set; }
+}
 
-        public string[]? StandardGroups { get; set; }
-        public string[]? PrivilegedGroups { get; set; }      // candidate privileged groups for UI
-        public string? PrivilegedPrimaryGroup { get; set; }  // fallback if UI doesn't choose
+public record UpdateUserRequest(
+    string Domain,
+    string SamAccountName,
+    string FirstName,
+    string LastName,
+    DateOnly? Birthdate,
+    DateOnly? ExpirationDate,
+    string MobileNumber
+);
 
-        // New properties for optional groups
-        public string[]? OptionalGeneralAccessGroup { get; set; }
-        public string[]? OptionalPrivilegeGroup { get; set; }
-    }
+public record UserRow
+{
+    public string Domain { get; set; } = string.Empty;
+    public string SamAccountName { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+    public bool IsLocked { get; set; }
+    public DateTime? ExpirationDate { get; set; }
+    public bool IsPrivileged { get; set; }
+}
 
-    public class CreateUserRequest
-    {
-        public string Domain { get; set; } = "";
-        public string FirstName { get; set; } = "";
-        public string LastName { get; set; } = "";
-        public DateOnly? Birthdate { get; set; }
-        public DateOnly? ExpirationDate { get; set; }
-        public string SamAccountName { get; set; } = "";
-        public string? MobileNumber { get; set; }
-        public bool CreatePrivileged { get; set; }
-
-        // NEW: privileged group selection at creation time
-        public string? SelectedPrivilegedGroupCn { get; set; } // e.g. "Domain Admins"
-        public bool MakeSelectedPrimary { get; set; } = false; // if true and -a is created, set as primary
-
-        // New properties for multi-group selection
-        public string[]? SelectedGeneralAccessGroups { get; set; }
-        public string[]? SelectedPrivilegeAccessGroups { get; set; }
-    }
-
-    public class UpdateUserRequest
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string FirstName { get; set; } = "";
-        public string LastName { get; set; } = "";
-        public DateOnly? Birthdate { get; set; }
-        public DateOnly? ExpirationDate { get; set; }
-        public string? MobileNumber { get; set; }
-        public bool CreatePrivileged { get; set; } // kept for parity (ignored by update)
-    }
-
-    public class CreateUserResult
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string DisplayName { get; set; } = "";
-        public string DistinguishedName { get; set; } = "";
-        public string OuCreatedIn { get; set; } = "";
-        public bool Enabled { get; set; }
-        public bool IsLocked { get; set; }
-        public DateTime? ExpirationDate { get; set; }
-        public string? MobileNumber { get; set; }
-
-        public string InitialPassword { get; set; } = "";
-        public string? AdminInitialPassword { get; set; } = null;
-        public bool HasPrivileged { get; set; }
-        public string[] GroupsAdded { get; set; } = Array.Empty<string>();
-    }
-
-    public class UserRow
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string DisplayName { get; set; } = "";
-        public bool Enabled { get; set; }
-        public bool IsLocked { get; set; }
-        public DateTime? ExpirationDate { get; set; }
-        public bool IsPrivileged { get; set; }
-    }
-
-    public class SelfServiceResetRequest
-    {
-        public string Domain { get; set; } = "";
-        public string SamAccountName { get; set; } = "";
-        public string Birthdate { get; set; } = ""; // yyyy-MM-dd
-        public string? MobileLast4 { get; set; }
-        public string NewPassword { get; set; } = "";
-    }
+public record UserDetails
+{
+    public string Domain { get; set; } = string.Empty;
+    public string SamAccountName { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public string? MobileNumber { get; set; }
+    public string? Birthdate { get; set; } // Using string for yyyy-MM-dd format
+    public DateTime? ExpirationDate { get; set; }
 }

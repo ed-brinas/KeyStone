@@ -51,7 +51,7 @@ body {
 
 /* Footer Styling */
 .footer {
-    background-color: var(--bs-dark) !important;
+    background-color: var(--bs-primary) !important;
     font-size: 0.9em;
 }
 
