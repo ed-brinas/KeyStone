@@ -1,81 +1,84 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>Self-Service Password Reset</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link rel="stylesheet" href="/css/bootstrap.min.css"/>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Self-Service Portal - KeyStone</title>
+    <link href="../css/bootstrap.min.css" rel="stylesheet">
+    <link href="../css/bootstrap-icons.css" rel="stylesheet">
+    <link href="../css/style.css" rel="stylesheet">
 </head>
-<body class="bg-white">
-  <main class="container py-5">
-    <div class="row justify-content-center">
-      <div class="col-lg-6">
-        <div class="card shadow-sm">
-          <div class="card-header bg-primary text-white">Self-Service Password Reset</div>
-          <div class="card-body">
-            <form id="selfForm" class="needs-validation" novalidate>
-              <div class="mb-3">
-                <label class="form-label">Domain</label>
-                <input id="domain" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Username</label>
-                <input id="username" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Date of Birth</label>
-                <input id="dob" type="date" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Last 4 digits of Mobile</label>
-                <input id="mobile4" maxlength="4" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">New Password</label>
-                <input id="newpass" type="password" class="form-control" required>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">Retype Password</label>
-                <input id="repass" type="password" class="form-control" required>
-              </div>
-              <button class="btn btn-primary w-100" type="submit">Reset Password</button>
-            </form>
-          </div>
+<body class="d-flex flex-column min-vh-100 bg-light">
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-key-fill"></i> KeyStone AD Manager
+            </a>
+            <span class="navbar-text">
+                Self-Service Portal
+            </span>
         </div>
-      </div>
-    </div>
-  </main>
-  <div class="modal fade" id="infoModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Notice</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="infoModalBody"></div>
-      <div class="modal-footer"><button class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
-    </div></div>
-  </div>
-  <script src="/js/bootstrap.bundle.min.js"></script>
-  <script src="/js/jquery.min.js"></script>
-  <script>
-    $('#selfForm').on('submit', async function(e){
-      e.preventDefault();
-      const d = {
-        domain: $('#domain').val(),
-        username: $('#username').val(),
-        dob: $('#dob').val(),
-        mobile4: $('#mobile4').val(),
-        newPassword: $('#newpass').val(),
-        rePassword: $('#repass').val()
-      };
-      if(d.newPassword!==d.rePassword){showInfo('Passwords do not match');return;}
-      try {
-        await api('/api/selfservice/reset','POST',d);
-        showInfo('Password reset successful.');
-      } catch(err){showInfo('Error: '+err.message);}
-    });
-    function showInfo(msg){
-      $('#infoModalBody').text(msg);
-      new bootstrap.Modal(document.getElementById('infoModal')).show();
-    }
-  </script>
+    </nav>
+
+    <main class="flex-grow-1 container d-flex align-items-center justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow">
+                <div class="card-header text-center bg-white py-3">
+                    <h2 class="card-title mb-0"><i class="bi bi-person-badge me-2"></i>Account Recovery</h2>
+                </div>
+                <div class="card-body p-4 p-md-5">
+                    <p class="text-muted text-center mb-4">Please fill out the form below to reset your password. Your account will be unlocked automatically.</p>
+                    
+                    <form id="reset-form" class="needs-validation" novalidate>
+                        <div class="mb-3">
+                            <label for="domain" class="form-label">Domain</label>
+                            <select id="domain" class="form-select" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="sam" class="form-label">Username (SAM Account Name)</label>
+                            <input type="text" id="sam" class="form-control" required>
+                        </div>
+                        <hr class="my-4">
+                        <p class="text-muted text-center">Identity Verification</p>
+                        <div class="mb-3">
+                            <label for="dob" class="form-label">Date of Birth</label>
+                            <input type="date" id="dob" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="mobile" class="form-label">Last 4 Digits of Mobile Number</label>
+                            <input type="text" id="mobile" class="form-control" maxlength="4" required>
+                        </div>
+                        <hr class="my-4">
+                        <div class="mb-3">
+                            <label for="p1" class="form-label">New Password</label>
+                            <input type="password" id="p1" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="p2" class="form-label">Confirm New Password</label>
+                            <input type="password" id="p2" class="form-control" required>
+                        </div>
+                        <div class="d-grid mt-4">
+                            <button id="submit" type="submit" class="btn btn-primary btn-lg">
+                                <i class="bi bi-shield-check me-2"></i>Reset Password
+                            </button>
+                        </div>
+                    </form>
+                    <div id="result" class="mt-4"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <footer class="footer mt-auto py-3 bg-dark text-white text-center">
+        <div class="container">
+            <span>&copy; 2024 KeyStone AD Web Manager - Self-Service Portal</span>
+        </div>
+    </footer>
+
+    <script src="../js/jquery.min.js"></script>
+    <script src="../js/bootstrap.bundle.min.js"></script>
+    <script src="../js/app.js"></script>
+    <script src="../js/app.selfservice.js"></script>
 </body>
 </html>

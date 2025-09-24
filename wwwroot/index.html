@@ -1,50 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <title>AD Web Manager — Access Gate</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <link rel="stylesheet" href="/css/bootstrap.min.css"/>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>KeyStone AD Web Manager</title>
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/bootstrap-icons.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
 </head>
-<body class="bg-white">
-  <main class="container py-5">
-    <div class="row justify-content-center">
-      <div class="col-lg-8">
-        <div id="warningCard" class="card shadow-sm">
-          <div class="card-body">
-            <div class="alert alert-warning mb-4">
-              <strong>Warning:</strong> access to this page is strictly monitored.
-              Close your browser if you accessed this by mistake. Click Proceed to continue.
-            </div>
-            <div class="form-check mb-3">
-              <input class="form-check-input" type="checkbox" id="acceptCheck">
-              <label class="form-check-label" for="acceptCheck">I accept the terms and conditions.</label>
-            </div>
-            <div class="text-end">
-              <button id="proceedBtn" class="btn btn-primary" disabled>Proceed</button>
-            </div>
-          </div>
+<body class="d-flex flex-column min-vh-100">
+
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-key-fill"></i> KeyStone AD Manager
+            </a>
         </div>
-        <div id="actionCard" class="card shadow-sm d-none mt-4">
-          <div class="card-body">
-            <h5 class="card-title mb-3">What do you want to do today?</h5>
-            <div class="d-grid gap-3 d-sm-flex">
-              <a class="btn btn-primary" href="/admin/index.html">Create / Manage Users (Admin)</a>
-              <a class="btn btn-outline-primary" href="/selfservice/index.html">Reset My Password (Self-Service)</a>
+    </nav>
+
+    <main class="flex-grow-1">
+        <div class="container mt-5">
+            <div class="p-5 mb-4 bg-light rounded-3">
+                <div class="container-fluid py-5">
+                    <h1 class="display-5 fw-bold">Active Directory Web Manager</h1>
+                    <p class="col-md-8 fs-4">Welcome to KeyStone, a tool for managing Active Directory users and services. Please select one of the portals below to get started.</p>
+                </div>
             </div>
-          </div>
+
+            <div class="row align-items-md-stretch">
+                <div class="col-md-6 mb-4">
+                    <div class="h-100 p-5 text-white bg-dark rounded-3 card-hover">
+                        <h2><i class="bi bi-shield-lock"></i> Admin Portal</h2>
+                        <p>Manage users, reset passwords, and perform other administrative tasks. Requires authorized access.</p>
+                        <a class="btn btn-outline-light" href="/admin/" type="button">Go to Admin Portal <i class="bi bi-arrow-right-circle"></i></a>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-4">
+                    <div class="h-100 p-5 bg-light border rounded-3 card-hover">
+                        <h2><i class="bi bi-person-circle"></i> Self-Service Portal</h2>
+                        <p>Unlock your account or reset your password using your registered information.</p>
+                        <a class="btn btn-outline-secondary" href="/selfservice/" type="button">Go to Self-Service <i class="bi bi-arrow-right-circle"></i></a>
+                    </div>
+                </div>
+            </div>
         </div>
-      </div>
-    </div>
-  </main>
-  <script src="/js/bootstrap.bundle.min.js"></script>
-  <script>
-    const chk = document.getElementById('acceptCheck');
-    const btn = document.getElementById('proceedBtn');
-    const warn = document.getElementById('warningCard');
-    const act = document.getElementById('actionCard');
-    chk.addEventListener('change',()=>btn.disabled=!chk.checked);
-    btn.addEventListener('click',()=>{warn.classList.add('d-none');act.classList.remove('d-none');});
-  </script>
+    </main>
+
+    <footer class="footer mt-auto py-3 bg-dark text-white text-center">
+        <div class="container">
+            <span>&copy; 2024 KeyStone AD Web Manager</span>
+        </div>
+    </footer>
+
+    <script src="js/jquery.min.js"></script>
+    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/app.landing.js"></script>
+
 </body>
 </html>
