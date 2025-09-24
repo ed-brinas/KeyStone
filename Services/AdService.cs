@@ -15,7 +15,9 @@ namespace ADWebManager.Services
     public class AdOptions
     {
         public List<DomainConfig> Domains { get; set; } = new();
+        /// <summary>Which AD attribute stores the DOB in "yyyy-MM-dd" (e.g., "extensionAttribute1").</summary>
         public string BirthdateAttribute { get; set; } = "extensionAttribute1";
+        /// <summary>How many days a privileged (-a) account should be valid (account expiration). Minimum 1.</summary>
         public int PrivilegedAccountValidityDays { get; set; } = 30;
     }
 
@@ -57,7 +59,8 @@ namespace ADWebManager.Services
             _passwords = passwords ?? new DefaultPasswordGenerator();
         }
 
-        // ---------- Public ----------
+        // ------------------------- Public API -------------------------
+
         public CreateUserResult CreateUser(CreateUserRequest req, string caller)
         {
             var d = GetDomain(req.Domain);
@@ -67,11 +70,12 @@ namespace ADWebManager.Services
             Require(req.Birthdate.HasValue, "Birthdate required.");
             Require(req.ExpirationDate.HasValue, "Expiration date required.");
             Require(!string.IsNullOrWhiteSpace(req.SamAccountName), "Username required.");
+            Require(!string.IsNullOrWhiteSpace(req.MobileNumber), "Mobile number required.");
 
             var sam = req.SamAccountName!.Trim();
             var display = ToSentenceCase($"{req.FirstName} {req.LastName}");
 
-            // Regular account
+            // Create regular account
             var stdPass = _passwords.GenerateStandard();
             var (userDn, userOu, _) = CreateAccountInternal(
                 d, sam, display, req, stdPass,
@@ -94,21 +98,18 @@ namespace ADWebManager.Services
                     isPrivileged: true,
                     expireAtLogon: false);
 
-                // Add all configured privileged groups (if any)
+                // Add configured privileged groups
                 if (d.PrivilegedGroups != null)
                     foreach (var g in d.PrivilegedGroups) TryAddToGroup(d, adminSam, g, groupsAdded);
 
-                // NEW: Add the selected privileged group (if provided and not already included)
+                // Add the user-selected privileged group (if provided)
                 if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
-                    TryAddToGroup(d, adminSam, req.SelectedPrivilegedGroupCn, groupsAdded);
+                    TryAddToGroup(d, adminSam, req.SelectedPrivilegedGroupCn!, groupsAdded);
 
-                // Decide primary group:
-                // 1) If MakeSelectedPrimary==true and a SelectedPrivilegedGroupCn is provided → make it primary.
-                // 2) Else if config has a fallback PrivilegedPrimaryGroup → use that.
+                // Set primary group preference
                 if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                 {
                     TrySetPrimaryGroup(d, adminSam, req.SelectedPrivilegedGroupCn!);
-                    // Optional: remove default "Domain Users"
                     TryRemoveFromGroup(d, adminSam, "Domain Users");
                 }
                 else if (!string.IsNullOrWhiteSpace(d.PrivilegedPrimaryGroup))
@@ -136,7 +137,6 @@ namespace ADWebManager.Services
             };
         }
 
-
         public void UpdateUser(UpdateUserRequest req, string caller)
         {
             var d = GetDomain(req.Domain);
@@ -145,6 +145,7 @@ namespace ADWebManager.Services
             Require(!string.IsNullOrWhiteSpace(req.LastName), "Last name required.");
             Require(req.Birthdate.HasValue, "Birthdate required.");
             Require(req.ExpirationDate.HasValue, "Expiration required.");
+            Require(!string.IsNullOrWhiteSpace(req.MobileNumber), "Mobile number required.");
 
             using var ctx = AdminContext(d);
             var user = FindBySam(ctx, req.SamAccountName!) ?? throw new Exception("User not found.");
@@ -194,16 +195,25 @@ namespace ADWebManager.Services
             var newPass = isAdmin ? _passwords.GenerateAdmin() : _passwords.GenerateStandard();
 
             user.SetPassword(newPass);
-            if (unlock) { try { user.UnlockAccount(); } catch { } user.Enabled = true; }
+            if (unlock)
+            {
+                try { user.UnlockAccount(); } catch { }
+                user.Enabled = true;
+            }
             user.Save();
             return newPass;
         }
 
+        /// <summary>
+        /// Self-service reset: requires DOB match (yyyy-MM-dd) AND last-4 digits of mobile to match.
+        /// Blocks privileged (-a) accounts.
+        /// </summary>
         public async Task SelfServiceResetPasswordAsync(SelfServiceResetRequest req)
         {
             Require(!string.IsNullOrWhiteSpace(req.Domain), "Domain required.");
             Require(!string.IsNullOrWhiteSpace(req.SamAccountName), "Username required.");
             Require(!string.IsNullOrWhiteSpace(req.Birthdate), "Birthdate required.");
+            Require(!string.IsNullOrWhiteSpace(req.MobileLast4), "Last 4 digits of mobile required.");
             Require(!string.IsNullOrWhiteSpace(req.NewPassword), "New password required.");
 
             if (req.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase))
@@ -215,23 +225,21 @@ namespace ADWebManager.Services
 
             using var de = (DirectoryEntry)user.GetUnderlyingObject();
 
-            // Verify DOB
+            // Verify DOB (string match on yyyy-MM-dd)
             var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
             var storedDob = (de.Properties[dobAttr]?.Value as string)?.Trim();
             var expectedDob = req.Birthdate.Trim();
             if (string.IsNullOrWhiteSpace(storedDob) || !string.Equals(storedDob, expectedDob, StringComparison.Ordinal))
                 throw new Exception("Identity verification failed (DOB).");
 
-            // Verify last-4 of mobile
-            if (!string.IsNullOrWhiteSpace(req.MobileLast4))
-            {
-                var storedMobile = (de.Properties["mobile"]?.Value as string) ?? "";
-                var digits = new string(storedMobile.Where(char.IsDigit).ToArray());
-                var last4 = digits.Length >= 4 ? digits[^4..] : digits;
-                if (string.IsNullOrWhiteSpace(last4) || !string.Equals(last4, req.MobileLast4.Trim(), StringComparison.Ordinal))
-                    throw new Exception("Identity verification failed (mobile).");
-            }
+            // Verify last-4 of mobile (ENFORCED)
+            var storedMobile = (de.Properties["mobile"]?.Value as string) ?? string.Empty;
+            var digits = new string(storedMobile.Where(char.IsDigit).ToArray());
+            var last4 = digits.Length >= 4 ? digits[^4..] : digits;
+            if (string.IsNullOrWhiteSpace(last4) || !string.Equals(last4, req.MobileLast4!.Trim(), StringComparison.Ordinal))
+                throw new Exception("Identity verification failed (mobile).");
 
+            // If we got here, identity is verified: set password, unlock, enable
             user.SetPassword(req.NewPassword);
             try { user.UnlockAccount(); } catch { }
             user.Enabled = true;
@@ -296,7 +304,8 @@ namespace ADWebManager.Services
             return rows;
         }
 
-        // ---------- Internals ----------
+        // ------------------------- Internals -------------------------
+
         private (string dn, string ouUsed, UserPrincipal up) CreateAccountInternal(
             DomainConfig d, string sam, string display, CreateUserRequest req,
             string password, bool isPrivileged, bool expireAtLogon)
@@ -334,11 +343,9 @@ namespace ADWebManager.Services
             // Attributes
             entry.Properties["displayName"].Value = display;
 
+            var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
             if (req.Birthdate.HasValue)
-            {
-                var dobAttr = _opts.BirthdateAttribute ?? "extensionAttribute1";
                 entry.Properties[dobAttr].Value = req.Birthdate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            }
 
             if (!string.IsNullOrWhiteSpace(req.MobileNumber))
                 entry.Properties["mobile"].Value = req.MobileNumber;
@@ -388,9 +395,11 @@ namespace ADWebManager.Services
             s = s.Trim();
             return s.Length == 1 ? s.ToUpperInvariant() : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
         }
-        private static void Require(bool predicate, string message) { if (!predicate) throw new Exception(message); }
 
-        // Groups
+        private static void Require(bool predicate, string message)
+        { if (!predicate) throw new Exception(message); }
+
+        // ---- Group helpers ----
         private void TryAddToGroup(DomainConfig d, string sam, string groupCn, List<string>? auditList = null)
         {
             try
@@ -403,8 +412,9 @@ namespace ADWebManager.Services
                 var userDn = (string)deUser.Properties["distinguishedName"].Value;
                 if (!ContainsDn(members, userDn)) { members.Add(userDn); deGroup.CommitChanges(); }
                 auditList?.Add(groupCn);
-            } catch { }
+            } catch { /* swallow and continue */ }
         }
+
         private void TryRemoveFromGroup(DomainConfig d, string sam, string groupCn)
         {
             try
@@ -418,6 +428,7 @@ namespace ADWebManager.Services
                 if (ContainsDn(members, userDn)) { members.Remove(userDn); deGroup.CommitChanges(); }
             } catch { }
         }
+
         private void TrySetPrimaryGroup(DomainConfig d, string sam, string primaryGroupCn)
         {
             try
@@ -432,6 +443,7 @@ namespace ADWebManager.Services
                 deUser.CommitChanges();
             } catch { }
         }
+
         private static bool ContainsDn(PropertyValueCollection members, string dn)
         {
             foreach (var m in members) if (string.Equals(m?.ToString(), dn, StringComparison.OrdinalIgnoreCase)) return true;

@@ -1,177 +1,71 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>AD Portal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Offline styles -->
-  <link rel="stylesheet" href="/css/bootstrap.min.css" />
-
-  <style>
-    :root {
-      --bg-dark: #050b12;
-      --glow: rgba(0, 153, 255, 0.35);
-      --panel: rgba(10, 20, 35, 0.7);
-      --accent: #00b3ff;
-    }
-    html, body {
-      height: 100%;
-      background: var(--bg-dark);
-      overflow: hidden; /* keep it cinematic */
-    }
-    /* Fullscreen canvas background */
-    #matrixCanvas {
-      position: fixed; inset: 0; z-index: 0;
-      background: radial-gradient(ellipse at center, #06111d 0%, #040a12 60%, #02060b 100%);
-    }
-    /* Overlay gradient for depth */
-    .overlay-grad {
-      position: fixed; inset: 0; z-index: 1;
-      background: linear-gradient(180deg, rgba(0, 179, 255, 0.08), transparent 35%, rgba(0, 179, 255, 0.08));
-      pointer-events: none;
-    }
-    /* Subtle animated scanline glow */
-    .scanline {
-      position: fixed; left: 0; right: 0; height: 160px; top: -160px; z-index: 2;
-      background: radial-gradient(ellipse at center, var(--glow), transparent 70%);
-      filter: blur(20px);
-      animation: scan 6s linear infinite;
-      pointer-events: none;
-      opacity: .35;
-    }
-    @keyframes scan {
-      0% { top: -160px; }
-      100% { top: calc(100% + 160px); }
-    }
-
-    /* Center stage container */
-    .stage {
-      position: relative; z-index: 3;
-      display: grid; place-items: center; height: 100%;
-      padding: 24px;
-    }
-
-    /* Glassy card */
-    .card-glass {
-      background: var(--panel);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      border: 1px solid rgba(0, 179, 255, .25);
-      box-shadow: 0 0 30px rgba(0, 179, 255, .15), inset 0 0 30px rgba(0, 179, 255, .05);
-      border-radius: 16px;
-      color: #e8f6ff;
-      max-width: 720px;
-      width: 100%;
-    }
-
-    h1, h2, h5 { color: #dff4ff; }
-    .lead { color: #bfe8ff; }
-    .btn-accent {
-      --bs-btn-color: #001018;
-      --bs-btn-bg: var(--accent);
-      --bs-btn-border-color: var(--accent);
-      --bs-btn-hover-bg: #00a0e6;
-      --bs-btn-hover-border-color: #00a0e6;
-      --bs-btn-active-bg: #0090cf;
-      --bs-btn-active-border-color: #0090cf;
-      --bs-btn-shadow: 0 0 0 0.25rem rgba(0,179,255,.25);
-    }
-    .btn-ghost {
-      color: #9adfff; border: 1px solid rgba(154, 223, 255, .35);
-      background: rgba(0, 179, 255, .08);
-    }
-    .btn-ghost:hover { background: rgba(0, 179, 255, .16); }
-
-    /* Splash (warning) as full-screen gate */
-    .splash {
-      position: fixed; inset: 0; z-index: 4; display: grid; place-items: center;
-      background: linear-gradient(180deg, rgba(0, 10, 18, .85), rgba(0, 10, 18, .95));
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-    }
-    .splash .card-glass { max-width: 760px; }
-    .splash .warning {
-      border-left: 4px solid #ffc107; padding-left: 12px; color: #ffe7a3;
-    }
-
-    .footer {
-      position: fixed; z-index: 3; left: 0; right: 0; bottom: 0;
-      color: #7ecfff; text-align: center; font-size: 12px; padding: 10px 0;
-      opacity: .9;
-    }
-    code { color: #7ecfff; }
-  </style>
+  <meta charset="utf-8"/>
+  <title>AD Web Manager — Access Gate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- Local Bootstrap -->
+  <link rel="stylesheet" href="/css/bootstrap.min.css"/>
 </head>
-<body>
-
-  <canvas id="matrixCanvas"></canvas>
-  <div class="overlay-grad"></div>
-  <div class="scanline"></div>
-
-  <!-- Splash / Warning Gate -->
-  <div id="splash" class="splash">
-    <div class="card card-glass shadow-lg">
-      <div class="card-body p-4 p-md-5">
-        <h2 class="mb-3"><i class="bi bi-shield-lock"></i> Authorized Use Notice</h2>
-        <p class="warning mb-3">
-          <strong>Warning:</strong> Access to this page is <em>strictly monitored</em>. If you accessed this page by mistake,
-          please close your browser now. To continue, press <strong>Proceed</strong> to accept the site’s terms and conditions.
-        </p>
-        <div class="d-flex gap-2">
-          <button id="exitBtn" class="btn btn-outline-warning">
-            <i class="bi bi-x-circle"></i> Exit
-          </button>
-          <button id="proceedBtn" class="btn btn-accent">
-            <i class="bi bi-check2-circle"></i> Proceed
-          </button>
-        </div>
-        <p class="mt-3 text-muted small mb-0">
-          By clicking <em>Proceed</em>, you acknowledge your actions may be logged and reviewed by the security team.
-        </p>
-      </div>
+<body class="bg-white">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <div class="container">
+      <span class="navbar-brand">AD Web Manager</span>
     </div>
-  </div>
+  </nav>
 
-  <!-- Main Choice Card -->
-  <div class="stage">
-    <div class="card card-glass shadow-lg">
-      <div class="card-body p-4 p-md-5">
-        <h1 class="mb-2">What do you want to do today?</h1>
-        <p class="lead mb-4">Choose an option below to continue.</p>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <div class="p-3 border rounded h-100">
-              <h5 class="mb-2"><i class="bi bi-person-plus"></i> Create a user</h5>
-              <p class="mb-3">Create a regular domain account. (Admin access required)</p>
-              <button id="createUserBtn" class="btn btn-ghost w-100">
-                Continue to Admin Portal
-              </button>
-              <div class="text-muted small mt-2">You’ll be prompted with Windows authentication.</div>
+  <main class="container py-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <div class="alert alert-warning">
+          <strong>Warning:</strong> access to this page is strictly monitored. If you accessed this page by mistake,
+          please close your browser. Click <em>Proceed</em> to accept the site terms and conditions.
+        </div>
+
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5 class="card-title mb-3">What do you want to do today?</h5>
+            <p class="text-muted">Choose an action below.</p>
+
+            <div class="d-grid gap-3 d-sm-flex">
+              <a class="btn btn-primary" href="/admin/index.html">Create / Manage Users (Admin)</a>
+              <a class="btn btn-outline-primary" href="/selfservice/index.html">Reset My Password (Self-Service)</a>
+            </div>
+
+            <hr class="my-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="" id="acceptCheck">
+              <label class="form-check-label" for="acceptCheck">
+                I accept the site terms and conditions.
+              </label>
             </div>
           </div>
-          <div class="col-md-6">
-            <div class="p-3 border rounded h-100">
-              <h5 class="mb-2"><i class="bi bi-key"></i> Reset your password</h5>
-              <p class="mb-3">Self-service password portal</p>
-              <button id="resetPwdBtn" class="btn btn-accent w-100">
-                Go to Self-Service
-              </button>
-              <div class="text-muted small mt-2">NOTE: Privileged accounts are blocked here!</div>
-            </div>
+          <div class="card-footer text-end">
+            <button id="proceedBtn" class="btn btn-primary" disabled>Proceed</button>
           </div>
         </div>
+
       </div>
     </div>
-  </div>
+  </main>
 
-  <div class="footer">&copy; 2025 ADWebManager · All access is logged.</div>
+  <footer class="border-top py-4">
+    <div class="container text-center text-muted">
+      &copy; 2025 ADWebManager. All access is logged.
+    </div>
+  </footer>
 
-  <!-- Offline scripts -->
+  <!-- Local Bootstrap JS -->
   <script src="/js/bootstrap.bundle.min.js"></script>
-  <script src="/js/jquery.min.js"></script>
-  <script src="/js/app.landing.js"></script>
-  <!-- Bootstrap Icons (offline). If you don’t already serve it, remove the <i class="bi ..."> icons or add your local files -->
-  <link rel="stylesheet" href="/css/bootstrap-icons.css" />
+  <script>
+    const chk = document.getElementById('acceptCheck');
+    const btn = document.getElementById('proceedBtn');
+    chk.addEventListener('change', () => btn.disabled = !chk.checked);
+    btn.addEventListener('click', () => {
+      // If desired, store acceptance flag in sessionStorage/localStorage
+      sessionStorage.setItem('adwm.accepted', '1');
+      // Stay on this page — buttons above go to admin/selfservice
+    });
+  </script>
 </body>
 </html>

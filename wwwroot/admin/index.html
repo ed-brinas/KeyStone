@@ -1,142 +1,147 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="utf-8"/>
   <title>AD Admin Portal</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Local/offline assets -->
-  <link rel="stylesheet" href="/css/bootstrap.min.css" />
-  <link rel="stylesheet" href="/css/bootstrap-icons.css" />
-  <link rel="stylesheet" href="/css/style.css" />
-  <link rel="stylesheet" href="/css/gate.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- Local Bootstrap -->
+  <link rel="stylesheet" href="/css/bootstrap.min.css"/>
+  <link rel="stylesheet" href="/css/bootstrap-icons.css"/>
 </head>
-<body class="bg-light">
-  <nav class="navbar navbar-dark bg-primary mb-4">
-    <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">AD Admin Portal</span>
-      <span class="badge bg-warning text-dark">Access restricted — all actions are audited.</span>
+<body class="bg-white">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-3">
+    <div class="container">
+      <span class="navbar-brand">AD Admin Portal</span>
+      <span class="badge text-bg-warning">Restricted &amp; Audited</span>
     </div>
   </nav>
 
-  <main class="container">
+  <main class="container pb-5">
     <!-- Users grid -->
-    <div class="card shadow-sm mb-4">
-      <div class="card-header d-flex flex-wrap align-items-center gap-2">
-        <h5 class="m-0 me-auto">Users</h5>
-        <div class="d-flex flex-wrap align-items-center gap-2">
-          <select id="u_domain" class="form-select form-select-sm" style="min-width:220px;"></select>
-          <input id="q" type="text" class="form-control form-control-sm" placeholder="Search username…"/>
-          <button class="btn btn-sm btn-outline-secondary" id="refresh">Refresh</button>
+    <section class="mb-4">
+      <div class="card">
+        <div class="card-header">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <h5 class="m-0 me-auto">Users</h5>
+            <select id="u_domain" class="form-select form-select-sm" style="min-width:220px;"></select>
+            <input id="q" type="text" class="form-control form-control-sm" placeholder="Search username…"/>
+            <button id="refresh" class="btn btn-sm btn-outline-secondary">Refresh</button>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0" id="users">
+              <thead class="table-light">
+                <tr>
+                  <th>Domain</th>
+                  <th>Username</th>
+                  <th>Display Name</th>
+                  <th>Status</th>
+                  <th>Expires</th>
+                  <th>With Admin Account?</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle mb-0" id="users">
-            <thead class="table-light">
-              <tr>
-                <th>Domain</th>
-                <th>Username</th>
-                <th>Display Name</th>
-                <th>Status</th>
-                <th>Expires</th>
-                <th>With Admin Account?</th>
-                <th class="text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    </section>
 
     <!-- Create / Update -->
-    <div class="card shadow-sm mb-4">
-      <div class="card-header"><h5 class="m-0">Create / Update User</h5></div>
-      <div class="card-body">
-        <div class="alert alert-info small" role="alert">
-          Newly created <strong>standard</strong> accounts must change their password at first logon. Not applied to <strong>-a</strong> accounts.
-        </div>
-        <form id="userForm" class="row g-3 needs-validation" novalidate>
-          <div class="col-md-4">
-            <label class="form-label">Domain</label>
-            <select id="c_domain" class="form-select" required></select>
-            <div class="invalid-feedback">Domain is required.</div>
+    <section class="mb-4">
+      <div class="card">
+        <div class="card-header"><h5 class="m-0">Create / Update User</h5></div>
+        <div class="card-body">
+          <div class="alert alert-info small">
+            Standard accounts are set to change password at first logon. This does not apply to <strong>-a</strong> accounts.
           </div>
-          <div class="col-md-4">
-            <label class="form-label">First Name</label>
-            <input id="c_fn" class="form-control" required />
-            <div class="invalid-feedback">First name is required.</div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Last Name</label>
-            <input id="c_ln" class="form-control" required />
-            <div class="invalid-feedback">Last name is required.</div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Birthdate</label>
-            <input id="c_dob" type="date" class="form-control" required />
-            <div class="invalid-feedback">Birthdate is required.</div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Expiration</label>
-            <input id="c_exp" type="date" class="form-control" required />
-            <div class="invalid-feedback">Expiration date is required.</div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Mobile Number</label>
-            <input id="c_mobile" type="tel" class="form-control" placeholder="+9665xxxxxxxx" required />
-            <div class="invalid-feedback">Mobile number is required.</div>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Username (sAMAccountName)</label>
-            <input id="c_sam" class="form-control" required />
-            <div class="invalid-feedback">Username is required.</div>
-          </div>
-          <div class="col-12">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="c_priv" />
-              <label class="form-check-label" for="c_priv">Also create privileged (-a) account</label>
+          <form id="userForm" class="row g-3 needs-validation" novalidate>
+            <div class="col-md-4">
+              <label class="form-label">Domain</label>
+              <select id="c_domain" class="form-select" required></select>
+              <div class="invalid-feedback">Domain is required.</div>
             </div>
-          </div>
-
-          <!-- Privileged group selection -->
-          <div class="col-md-6">
-            <label class="form-label">Privileged Group (optional)</label>
-            <select id="c_priv_group" class="form-select">
-              <!-- populated by admin.js -->
-            </select>
-            <div class="form-text">Choose a privileged group to add to the -a account.</div>
-          </div>
-          <div class="col-md-6 d-flex align-items-end">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="c_priv_primary">
-              <label class="form-check-label" for="c_priv_primary">Set selected as Primary Group for -a</label>
+            <div class="col-md-4">
+              <label class="form-label">First Name</label>
+              <input id="c_fn" class="form-control" required>
+              <div class="invalid-feedback">First name is required.</div>
             </div>
-          </div>
-        </form>
+            <div class="col-md-4">
+              <label class="form-label">Last Name</label>
+              <input id="c_ln" class="form-control" required>
+              <div class="invalid-feedback">Last name is required.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Birthdate</label>
+              <input id="c_dob" type="date" class="form-control" required>
+              <div class="invalid-feedback">Birthdate is required.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Expiration</label>
+              <input id="c_exp" type="date" class="form-control" required>
+              <div class="invalid-feedback">Expiration date is required.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Mobile Number</label>
+              <input id="c_mobile" type="tel" class="form-control" placeholder="+9665xxxxxxxx" required>
+              <div class="invalid-feedback">Mobile number is required.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Username (sAMAccountName)</label>
+              <input id="c_sam" class="form-control" required>
+              <div class="invalid-feedback">Username is required.</div>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="c_priv">
+                <label class="form-check-label" for="c_priv">Also create privileged (-a) account</label>
+              </div>
+            </div>
 
-        <div class="mt-3 d-flex gap-2">
-          <button class="btn btn-primary" id="create"><i class="bi bi-person-plus"></i> Create User</button>
-          <button class="btn btn-outline-secondary" id="update"><i class="bi bi-save"></i> Update User</button>
+            <!-- Privileged group selection -->
+            <div class="col-md-6">
+              <label class="form-label">Privileged Group (optional)</label>
+              <select id="c_priv_group" class="form-select">
+                <!-- populated by admin.js -->
+              </select>
+            </div>
+            <div class="col-md-6 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="c_priv_primary">
+                <label class="form-check-label" for="c_priv_primary">Set selected as Primary Group for -a</label>
+              </div>
+            </div>
+          </form>
+
+          <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" id="create"><i class="bi bi-person-plus"></i> Create User</button>
+            <button class="btn btn-outline-secondary" id="update"><i class="bi bi-save"></i> Update User</button>
+          </div>
+          <p class="text-muted mt-2 mb-0">After creation, a summary modal shows credentials. “Export to PDF” excludes admin credentials.</p>
         </div>
-        <p class="text-muted mt-2 mb-0">After creation, a summary modal shows credentials. “Export to PDF” excludes admin credentials.</p>
       </div>
-    </div>
+    </section>
 
     <!-- Logs -->
-    <div class="card shadow-sm mb-4">
-      <div class="card-header d-flex align-items-center">
-        <h5 class="m-0 me-auto">Logs</h5>
-        <button class="btn btn-sm btn-outline-secondary" id="loadLogs">Load Logs</button>
+    <section>
+      <div class="card">
+        <div class="card-header d-flex align-items-center">
+          <h5 class="m-0 me-auto">Logs</h5>
+          <button class="btn btn-sm btn-outline-secondary" id="loadLogs">Load Logs</button>
+        </div>
+        <div class="card-body">
+          <pre id="logs" class="small mb-0" style="white-space:pre-wrap;"></pre>
+        </div>
       </div>
-      <div class="card-body">
-        <pre id="logs" class="small mb-0" style="white-space:pre-wrap;"></pre>
-      </div>
-    </div>
+    </section>
   </main>
 
-  <footer class="mt-5 py-4 border-top text-center text-muted">
-    <div class="container"><p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p></div>
+  <footer class="border-top py-4">
+    <div class="container text-center text-muted">
+      &copy; 2025 ADWebManager. All actions are logged and monitored.
+    </div>
   </footer>
 
   <!-- Modals -->
@@ -174,14 +179,10 @@
     </div></div>
   </div>
 
-  <!-- JS (order matters) -->
+  <!-- Local JS (order matters) -->
   <script src="/js/jquery.min.js"></script>
   <script src="/js/bootstrap.bundle.min.js"></script>
-  <script src="/js/app.js"></script>   <!-- provides api() + CSRF/session -->
+  <script src="/js/app.js"></script>
   <script src="/js/app.admin.js"></script>
-  <script src="/js/app.gate.js"></script>
-  <script>
-    Gate.init({ rememberSession: true, scopeKey: '/admin' });
-  </script>
 </body>
 </html>

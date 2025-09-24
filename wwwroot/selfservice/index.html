@@ -1,99 +1,137 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Password Self-Service</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/css/bootstrap.min.css" />
-  <link rel="stylesheet" href="/css/style.css" />
-  <link rel="stylesheet" href="/css/gate.css" />
+  <meta charset="utf-8"/>
+  <title>AD Self-Service</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <!-- Local Bootstrap -->
+  <link rel="stylesheet" href="/css/bootstrap.min.css"/>
 </head>
-<body class="bg-light">
-  <nav class="navbar navbar-dark bg-primary mb-4">
-    <div class="container-fluid"><span class="navbar-brand mb-0 h1">Password Self-Service</span></div>
+<body class="bg-white">
+  <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-3">
+    <div class="container">
+      <span class="navbar-brand">AD Self-Service</span>
+    </div>
   </nav>
 
-  <main class="container" style="max-width: 680px;">
-    <div class="card shadow-sm">
-      <div class="card-header"><h5 class="m-0">Reset / Unlock Your Account</h5></div>
-      <div class="card-body">
-        <div class="alert alert-info small" role="alert">
-          For security, verify your identity. Privileged accounts (usernames ending with <code>-a</code>) cannot use self-service.
-        </div>
-        <form id="ssForm" class="row g-3 needs-validation" novalidate>
-          <div class="col-12">
-            <label class="form-label">Domain</label>
-            <select id="ss_domain" class="form-select" required></select>
-            <div class="invalid-feedback">Please select your domain.</div>
+  <main class="container pb-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-7">
+        <div class="card">
+          <div class="card-header"><h5 class="m-0">Reset Your Password</h5></div>
+          <div class="card-body">
+            <p class="text-muted">Provide the details below. We’ll verify your identity (Date of Birth + last 4 digits of mobile), change your password, and enable/unlock your account.</p>
+
+            <form id="ssForm" class="row g-3 needs-validation" novalidate>
+              <div class="col-md-6">
+                <label class="form-label">Domain</label>
+                <select id="ss_domain" class="form-select" required></select>
+                <div class="invalid-feedback">Domain is required.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Username</label>
+                <input id="ss_user" class="form-control" required>
+                <div class="invalid-feedback">Username is required.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Date of Birth</label>
+                <input id="ss_dob" type="date" class="form-control" required>
+                <div class="invalid-feedback">Date of Birth is required.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Last 4 of Mobile</label>
+                <input id="ss_last4" class="form-control" minlength="4" maxlength="4" pattern="\\d{4}" required>
+                <div class="invalid-feedback">Enter the last 4 digits of your mobile.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">New Password</label>
+                <input id="ss_pw1" type="password" class="form-control" required>
+                <div class="invalid-feedback">New password is required.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Retype Password</label>
+                <input id="ss_pw2" type="password" class="form-control" required>
+                <div class="invalid-feedback">Please retype your password.</div>
+              </div>
+            </form>
+
+            <div class="mt-3 d-flex gap-2">
+              <button id="ss_reset" class="btn btn-primary">Reset Password</button>
+              <a class="btn btn-outline-secondary" href="/index.html">Back</a>
+            </div>
+            <div id="ss_msg" class="mt-3" role="alert"></div>
           </div>
-          <div class="col-12">
-            <label class="form-label">Username (sAMAccountName)</label>
-            <input id="ss_user" class="form-control" required />
-            <div class="invalid-feedback">Username is required.</div>
-          </div>
-          <div class="col-12">
-            <label class="form-label">Date of Birth</label>
-            <input id="ss_dob" type="date" class="form-control" required />
-            <div class="invalid-feedback">Date of birth is required.</div>
-          </div>
-          <div class="col-12">
-            <label class="form-label">Last 4 digits of Mobile</label>
-            <input id="ss_mobile4" type="text" maxlength="4" class="form-control" required />
-            <div class="invalid-feedback">Please enter the last 4 digits.</div>
-          </div>
-          <div class="col-12">
-            <label class="form-label">New Password</label>
-            <input id="ss_new" type="password" class="form-control" required />
-            <div class="form-text">Use a strong password that meets your policy.</div>
-            <div class="invalid-feedback">New password is required.</div>
-          </div>
-          <div class="col-12">
-            <label class="form-label">Retype New Password</label>
-            <input id="ss_new2" type="password" class="form-control" required />
-            <div class="invalid-feedback">Please retype the password.</div>
-          </div>
-        </form>
-        <div class="mt-3 d-flex gap-2">
-          <button class="btn btn-primary" id="ss_submit">Change Password</button>
-          <button class="btn btn-outline-secondary" id="ss_clear">Clear</button>
         </div>
       </div>
     </div>
   </main>
 
-  <footer class="mt-5 py-4 border-top text-center text-muted">
-    <div class="container"><p class="mb-0">&copy; 2025 ADWebManager. All actions are logged and monitored.</p></div>
+  <footer class="border-top py-4">
+    <div class="container text-center text-muted">
+      &copy; 2025 ADWebManager. Self-service resets are logged.
+    </div>
   </footer>
 
-  <!-- Modals -->
-  <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="infoModalTitle">Notice</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="infoModalBody">Done.</div>
-      <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button></div>
-    </div></div>
-  </div>
-  <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title" id="confirmModalTitle">Confirm</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-      <div class="modal-body" id="confirmModalBody">Proceed?</div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-danger" id="confirmModalOk">Yes</button>
-      </div>
-    </div></div>
-  </div>
-
+  <!-- Local JS -->
   <script src="/js/jquery.min.js"></script>
   <script src="/js/bootstrap.bundle.min.js"></script>
   <script src="/js/app.js"></script>
-  <script src="/js/app.selfservice.js"></script>
-
-  <!-- Gate: include last so it can overlay everything -->
-  <script src="/js/app.gate.js"></script>
   <script>
-    // Separate session gate per path
-    Gate.init({ rememberSession: true, scopeKey: '/selfservice' });
+    // Minimal self-service logic using the same api() helper from app.js
+    async function loadDomains() {
+      try {
+        const d = await api('/api/config/domains');
+        const sel = document.getElementById('ss_domain');
+        sel.innerHTML = d.map(x => `<option>${x}</option>`).join('');
+      } catch {
+        document.getElementById('ss_domain').innerHTML = '<option value="" disabled>(no domains)</option>';
+      }
+    }
+
+    function isValid(form) {
+      if (!form.checkValidity()) { form.classList.add('was-validated'); return false; }
+      const p1 = document.getElementById('ss_pw1').value;
+      const p2 = document.getElementById('ss_pw2').value;
+      if (p1 !== p2) {
+        showMsg('danger', 'Passwords do not match.');
+        return false;
+      }
+      return true;
+    }
+
+    function showMsg(type, text) {
+      const el = document.getElementById('ss_msg');
+      el.className = `alert alert-${type}`;
+      el.textContent = text;
+    }
+
+    document.getElementById('ss_reset').addEventListener('click', async ()=>{
+      const form = document.getElementById('ssForm');
+      if (!isValid(form)) return;
+
+      const body = {
+        domain: document.getElementById('ss_domain').value,
+        samAccountName: document.getElementById('ss_user').value,
+        birthdate: document.getElementById('ss_dob').value,
+        mobileLast4: document.getElementById('ss_last4').value,
+        newPassword: document.getElementById('ss_pw1').value
+      };
+
+      try {
+        const r = await api('/api/selfservice/reset','POST', body);
+        if (r && r.ok) {
+          showMsg('success', 'Password updated. Your account is enabled/unlocked. You may now sign in.');
+          form.reset();
+          form.classList.remove('was-validated');
+        } else {
+          showMsg('danger', (r && r.message) || 'Reset failed.');
+        }
+      } catch (e) {
+        showMsg('danger', e?.body?.message || e.message || 'Reset failed.');
+      }
+    });
+
+    (async () => { await loadDomains(); })();
   </script>
 </body>
 </html>
