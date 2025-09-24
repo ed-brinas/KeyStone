@@ -1,6 +1,42 @@
+/* Blue Theme Variables */
+:root {
+    --bs-primary: #0d6efd;
+    --bs-primary-rgb: 13, 110, 253;
+    --bs-dark: #212529;
+    --bs-dark-rgb: 33, 37, 41;
+}
+
 /* General Body Styles */
 body {
-    background-color: #f8f9fa; /* Light grey background */
+    background-color: #f0f2f5; /* A slightly different light grey */
+}
+
+/* Navbar */
+.navbar-dark {
+    background-color: var(--bs-primary) !important;
+}
+
+.bg-primary {
+     background-color: var(--bs-primary) !important;
+}
+
+.nav-item .btn {
+    margin-left: 0.5rem;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--bs-primary);
+    border-color: var(--bs-primary);
+}
+
+.btn-outline-light {
+    --bs-btn-hover-color: var(--bs-primary);
+}
+
+.table-dark {
+    --bs-table-bg: var(--bs-primary);
+    --bs-table-border-color: #498ff3;
 }
 
 /* Card Hover Effect */
@@ -15,16 +51,18 @@ body {
 
 /* Footer Styling */
 .footer {
+    background-color: var(--bs-dark) !important;
     font-size: 0.9em;
 }
 
 /* Admin Page Specifics */
 .table-responsive {
-    max-height: 60vh;
+    max-height: 65vh;
     overflow-y: auto;
 }
 
-/* Ensure modal backdrops are dark */
+/* Modal backdrops */
 .modal-backdrop {
   background-color: rgba(0,0,0,0.5);
 }
+

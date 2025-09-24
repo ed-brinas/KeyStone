@@ -47,28 +47,11 @@ async function populateDomains() {
   $('#u_domain').html(opts(domains, true)).on('change', loadUsers);
 }
 
-async function loadPrivilegedGroupsFor(domain) {
-  $('#c_priv_group').empty();
-  if (!domain) return;
-  try {
-    const groups = await api('/api/config/privileged-groups?domain=' + encodeURIComponent(domain));
-    if (Array.isArray(groups) && groups.length) {
-      $('#c_priv_group').append('<option value="">(none)</option>');
-      groups.forEach(g => $('#c_priv_group').append(`<option value="${g}">${g}</option>`));
-    } else {
-      $('#c_priv_group').append('<option value="">(none)</option>');
-    }
-  } catch {
-    $('#c_priv_group').append('<option value="">(none)</option>');
-  }
-}
-
 async function loadOptionalGroups(domain) {
     $('#c_general_groups').empty();
     $('#c_priv_groups').empty();
     if (!domain) return;
     try {
-        // This assumes a new API endpoint exists to provide these lists.
         const data = await api('/api/config/optional-groups?domain=' + encodeURIComponent(domain));
         if (data.optionalGeneralAccessGroup && Array.isArray(data.optionalGeneralAccessGroup)) {
             data.optionalGeneralAccessGroup.forEach(g => $('#c_general_groups').append(`<option value="${g}">${g}</option>`));
@@ -184,6 +167,9 @@ function formDataOrInvalid() {
     form.classList.add('was-validated');
     return null;
   }
+  
+  const selectedPrivGroups = $('#c_priv_groups').val() || [];
+  
   return {
     domain: $('#c_domain').val(),
     firstName: $('#c_fn').val(),
@@ -193,12 +179,13 @@ function formDataOrInvalid() {
     mobileNumber: $('#c_mobile').val(),
     samAccountName: $('#c_sam').val(),
     createPrivileged: $('#c_priv').is(':checked'),
-    selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,
-    makeSelectedPrimary: $('#c_priv_primary').is(':checked'),
+    selectedPrivilegedGroupCn: selectedPrivGroups.length > 0 ? selectedPrivGroups[0] : null, // Backend logic needs to handle single/multiple
+    makeSelectedPrimary: $('#c_priv_primary_single').is(':checked') && selectedPrivGroups.length === 1,
     selectedGeneralAccessGroups: $('#c_general_groups').val() || [],
-    selectedPrivilegeAccessGroups: $('#c_priv_groups').val() || []
+    selectedPrivilegeAccessGroups: selectedPrivGroups
   };
 }
+
 
 // -------- Created summary modal --------
 let __lastCreatePayload = null;
@@ -245,6 +232,18 @@ async function exportCreatedPdf() {
   await api('/api/admin/create-user/export-pdf', 'POST', __lastCreatePayload.result);
 }
 
+// -------- Audit Log Modal Logic --------
+async function loadAndDisplayLogs() {
+    try {
+        const r = await api('/api/admin/logs');
+        $('#logs').text(r.entries.join('\n') || 'No log entries found.');
+    } catch (err) {
+        $('#logs').text('Failed to load logs.');
+        console.error('Error loading logs:', err);
+    }
+}
+
+
 // -------- Wire up buttons --------
 $('#create').click(async ()=>{
   const body = formDataOrInvalid();
@@ -261,22 +260,28 @@ $('#create').click(async ()=>{
   $('#privileged-options').hide();
 });
 
-$('#loadLogs').click(async ()=>{ const r = await api('/api/admin/logs'); $('#logs').text(r.entries.join('\n')); });
 $('#refresh').click(loadUsers);
 $('#q').on('input', loadUsers);
 document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
 document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
 
-// -------- Wire up form element events --------
+// Logs Modal events
+const logsModalEl = document.getElementById('logsModal');
+if(logsModalEl) {
+    logsModalEl.addEventListener('show.bs.modal', loadAndDisplayLogs);
+}
+const loadLogsBtn = document.getElementById('loadLogs');
+if(loadLogsBtn) {
+    loadLogsBtn.addEventListener('click', loadAndDisplayLogs);
+}
 
-// React to domain change to load relevant groups
+
+// -------- Wire up form element events --------
 $('#c_domain').on('change', function(){
   const domain = this.value;
-  loadPrivilegedGroupsFor(domain);
   loadOptionalGroups(domain);
 });
 
-// Show/hide privileged options based on checkbox
 $('#c_priv').on('change', function() {
     $('#privileged-options').toggle(this.checked);
 });
@@ -290,9 +295,9 @@ $('#c_priv').on('change', function() {
   // Preload groups for the initial domain selected in the form
   const initialDomain = $('#c_domain').val();
   if (initialDomain) {
-      await loadPrivilegedGroupsFor(initialDomain);
       await loadOptionalGroups(initialDomain);
   }
   
   await loadUsers();
 })();
+
