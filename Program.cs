@@ -133,6 +133,24 @@ app.MapGet("/api/config/privileged-groups", (HttpContext ctx, Microsoft.Extensio
     return Results.Ok(groups);
 }).AllowAnonymous();
 
+// Returns the configured optional groups from AdSettings
+app.MapGet("/api/config/optional-groups", (HttpContext ctx, Microsoft.Extensions.Options.IOptions<AdSettings> cfg) =>
+{
+    var ad = cfg.Value ?? new AdSettings();
+    var domain = ctx.Request.Query["domain"].ToString();
+
+    // You can add logic here to filter groups based on the domain if needed.
+    // For now, we'll return all configured optional groups.
+
+    var optionalGroups = new
+    {
+        optionalGeneralAccessGroup = ad.Provisioning?.OptionalGeneralAccessGroup ?? new List<string>(),
+        optionalPrivilegeGroup = ad.Provisioning?.OptionalPrivilegeGroup ?? new List<string>()
+    };
+
+    return Results.Ok(optionalGroups);
+}).AllowAnonymous();
+
 // -------- Admin (Windows auth) --------
 app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, HttpContext ctx) =>
 {
