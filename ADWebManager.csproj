@@ -1,22 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <!-- Use the same major as your runtime; net6.0/net7.0/net8.0 all OK -->
+    <!-- Pick one: net6.0 / net7.0 / net8.0 -->
     <TargetFramework>net8.0</TargetFramework>
 
-    <!-- Required to build DirectoryServices on non-Windows dev boxes -->
+    <!-- Makes DirectoryServices build even on non-Windows dev boxes -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- Optional but recommended for IIS worker process -->
-    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Nice to have -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- AD / LDAP APIs -->
+    <!-- AD / LDAP -->
     <PackageReference Include="System.DirectoryServices" Version="8.0.0" />
     <PackageReference Include="System.DirectoryServices.AccountManagement" Version="8.0.0" />
     <PackageReference Include="System.DirectoryServices.Protocols" Version="8.0.0" />
 
-    <!-- Windows Negotiate (Kerberos/NTLM) for /admin -->
+    <!-- Windows Negotiate (Kerberos/NTLM) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.8" />
   </ItemGroup>
 </Project>

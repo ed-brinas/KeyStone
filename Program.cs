@@ -1,27 +1,35 @@
+// Explicit usings so it compiles even if ImplicitUsings is disabled
+using System;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ADWebManager.Models;
-using ADWebManager.Services;
+using System.Threading.Tasks;
+
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+using ADWebManager.Models;
+using ADWebManager.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------- Options / DI ----------
 builder.Services.Configure<AdOptions>(builder.Configuration.GetSection("Ad"));
+builder.Services.Configure<AuditLogOptions>(builder.Configuration.GetSection("Audit"));
+builder.Services.Configure<HealthOptions>(builder.Configuration.GetSection("Health"));
 builder.Services.AddSingleton<AuditLogService>(_ =>
     new AuditLogService(builder.Configuration.GetSection("Audit").Get<AuditLogOptions>() ?? new AuditLogOptions()));
 builder.Services.AddSingleton<PasswordService>(_ =>
     new PasswordService(builder.Configuration.GetSection("PasswordPolicy").Get<PasswordPolicyOptions>() ?? new PasswordPolicyOptions()));
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddSingleton<AdService>();
-
-// Health & Security
 builder.Services.AddSingleton<HealthService>();
-builder.Services.AddSingleton<SecurityService>(_ => 
+builder.Services.AddSingleton<SecurityService>(_ =>
     new SecurityService(builder.Configuration.GetSection("Security").Get<SecurityOptions>() ?? new SecurityOptions()));
-builder.Services.Configure<HealthOptions>(builder.Configuration.GetSection("Health"));
-builder.Services.Configure<AuditLogOptions>(builder.Configuration.GetSection("Audit"));
 
 // Windows (Negotiate) auth for /admin APIs
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
@@ -31,27 +39,25 @@ builder.Services.AddAuthorization(o =>
 });
 
 builder.Services.AddRouting();
-builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// ---------- Static & Security ----------
-app.UseDefaultFiles();    // serve index.html by default
+// ---------- Static & Auth ----------
+app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-// --- Simple session bootstrap (issues CSRF token + session cookie) ---
+// --- Session/CSRF bootstrap endpoint ---
 app.MapGet("/api/session/bootstrap", (HttpContext ctx, SecurityService sec) =>
 {
-    // Ensure or renew session and return CSRF token and device fingerprint preview (last 8 chars)
     var csrf = sec.GetCsrf(ctx);
-    return Results.Ok(new { ok = true, csrf, cookie = "set", fpTail = "…" + sec.EnsureSession(ctx).Fingerprint[^8..] });
+    var fpTail = "…" + sec.EnsureSession(ctx).Fingerprint[^8..];
+    return Results.Ok(new { ok = true, csrf, cookie = "set", fpTail });
 }).AllowAnonymous();
 
-// --- CSRF guard for unsafe admin API methods ---
-// We guard only authenticated admin routes and only for non-GET/HEAD/OPTIONS.
+// --- CSRF guard for unsafe admin calls ---
 app.Use(async (ctx, next) =>
 {
     var path = ctx.Request.Path.Value ?? "";
@@ -71,7 +77,7 @@ app.Use(async (ctx, next) =>
     await next();
 });
 
-// Minimal helper to read JSON body
+// Helpers
 async Task<T> ReadJson<T>(HttpContext ctx)
 {
     var obj = await JsonSerializer.DeserializeAsync<T>(ctx.Request.Body, new JsonSerializerOptions
@@ -85,24 +91,20 @@ async Task<T> ReadJson<T>(HttpContext ctx)
 string Caller(HttpContext ctx) => ctx.User?.Identity?.Name ?? "(anon)";
 string RemoteIp(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "(unknown)";
 
-// ---------- Public endpoints ----------
+// ---------- Routes ----------
 app.MapGet("/", ctx => { ctx.Response.Redirect("/index.html"); return Task.CompletedTask; }).AllowAnonymous();
 
-// Domains list (for dropdowns)
 app.MapGet("/api/config/domains", (Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
 {
     var names = (ao.Value?.Domains ?? new()).Select(d => d.Name).ToArray();
     return Results.Ok(names);
 }).AllowAnonymous();
 
-// Self-service reset
 app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
     try
     {
         var req = await ReadJson<SelfServiceResetRequest>(ctx);
-
-        // (Optional) password policy preview
         var (ok, problems) = pw.CheckStrength(req.NewPassword);
         if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
 
@@ -117,16 +119,10 @@ app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, Audi
     }
 }).AllowAnonymous();
 
-// ---------- Admin endpoints (Windows auth) ----------
-
-// Health dashboard API
+// -------- Admin (Windows auth) --------
 app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, HttpContext ctx) =>
 {
-    try
-    {
-        var r = health.GetReport();
-        return Results.Ok(new { ok = true, report = r });
-    }
+    try { return Results.Ok(new { ok = true, report = health.GetReport() }); }
     catch (Exception ex)
     {
         audit.Write(Caller(ctx), "health", "-", false, ex.Message, RemoteIp(ctx));
@@ -134,19 +130,17 @@ app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, Ht
     }
 }).RequireAuthorization("AdminOnly");
 
-// Users list
-app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService audit) =>
+app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService audit, Microsoft.Extensions.Options.IOptions<AdOptions> adOpts) =>
 {
     try
     {
         var domain = ctx.Request.Query["domain"].ToString();
-        var results = new List<UserRow>();
-        var domains = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AdOptions>>().Value.Domains.Select(d => d.Name);
+        var results = new System.Collections.Generic.List<UserRow>();
+        var domains = adOpts.Value.Domains.Select(d => d.Name);
         if (!string.IsNullOrWhiteSpace(domain))
             results.AddRange(ad.ListUsers(domain));
         else
             foreach (var d in domains) results.AddRange(ad.ListUsers(d));
-
         return Results.Ok(results);
     }
     catch (Exception ex)
@@ -156,7 +150,6 @@ app.MapGet("/api/admin/users", (HttpContext ctx, AdService ad, AuditLogService a
     }
 }).RequireAuthorization("AdminOnly");
 
-// Create user
 app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -164,14 +157,12 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
     {
         var req = await ReadJson<CreateUserRequest>(ctx);
         var result = ad.CreateUser(req, caller);
-
         var admin = new
         {
             created = req.CreatePrivileged,
             sam = req.CreatePrivileged ? result.SamAccountName + "-a" : null,
             password = req.CreatePrivileged ? result.AdminInitialPassword : null
         };
-
         audit.Write(caller, "create", $"{result.Domain}\\{result.SamAccountName}", true, $"priv={req.CreatePrivileged}", RemoteIp(ctx));
         return Results.Ok(new { ok = true, result, admin });
     }
@@ -182,7 +173,6 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
     }
 }).RequireAuthorization("AdminOnly");
 
-// Export PDF (regular only)
 app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -199,7 +189,6 @@ app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfServ
     }
 }).RequireAuthorization("AdminOnly");
 
-// Update user
 app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -217,7 +206,6 @@ app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, Audi
     }
 }).RequireAuthorization("AdminOnly");
 
-// Unlock
 app.MapPost("/api/admin/unlock", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -237,7 +225,6 @@ app.MapPost("/api/admin/unlock", async (HttpContext ctx, AdService ad, AuditLogS
     }
 }).RequireAuthorization("AdminOnly");
 
-// Enable/Disable
 app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -258,7 +245,6 @@ app.MapPost("/api/admin/enable", async (HttpContext ctx, AdService ad, AuditLogS
     }
 }).RequireAuthorization("AdminOnly");
 
-// Reset password
 app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
@@ -285,4 +271,3 @@ app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entrie
    .RequireAuthorization("AdminOnly");
 
 app.Run();
-// ---------- End of main code ----------
