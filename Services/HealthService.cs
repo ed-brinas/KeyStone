@@ -1,7 +1,7 @@
 using System;
-using System.Collections.Generic;
+using System.DirectoryServices;
 using System.Diagnostics;
-using System.DirectoryServices.ActiveDirectory;
+using System.Linq;
 using ADWebManager.Models;
 using Microsoft.Extensions.Options;
 
@@ -18,31 +18,42 @@ namespace ADWebManager.Services
 
         public HealthReport GetReport()
         {
-            var report = new HealthReport();
-            var targets = _cfg.HealthChecks?.DomainControllers ?? new List<DcTarget>();
+            var sw = Stopwatch.StartNew();
+            var checks = _cfg.Health.DomainControllers
+                .Select(dc => CheckDc(dc))
+                .ToList();
 
-            foreach (var target in targets)
+            return new HealthReport
             {
-                var result = new DcCheckResult { Name = target.Name, Domain = target.Domain };
-                var stopwatch = new Stopwatch();
-                try
-                {
-                    stopwatch.Start();
-                    using var dc = DomainController.FindOne(new DirectoryContext(DirectoryContextType.DirectoryServer, target.Name));
-                    result.IsReachable = dc != null;
-                    stopwatch.Stop();
-                    result.LatencyMs = stopwatch.ElapsedMilliseconds;
-                }
-                catch (Exception ex)
-                {
-                    stopwatch.Stop();
-                    result.IsReachable = false;
-                    result.Error = ex.Message;
-                    result.LatencyMs = stopwatch.ElapsedMilliseconds;
-                }
-                report.DomainControllerChecks.Add(result);
+                Timestamp = DateTime.UtcNow,
+                OverallDurationMs = sw.ElapsedMilliseconds,
+                DcChecks = checks
+            };
+        }
+
+        private DcCheckResult CheckDc(DcTarget dc)
+        {
+            var sw = Stopwatch.StartNew();
+            var result = new DcCheckResult { Domain = dc.Domain, Host = dc.Host, Status = "FAIL" };
+            try
+            {
+                using var de = new DirectoryEntry($"LDAP://{dc.Host}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
+                de.RefreshCache(new[] { "serverName" });
+
+                result.Status = (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyCritMs) ? "CRIT"
+                              : (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyWarnMs) ? "WARN"
+                              : "OK";
             }
-            return report;
+            catch (Exception ex)
+            {
+                result.Error = ex.Message;
+            }
+            finally
+            {
+                result.DurationMs = sw.ElapsedMilliseconds;
+            }
+            return result;
         }
     }
 }
+

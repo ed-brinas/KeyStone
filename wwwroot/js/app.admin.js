@@ -98,9 +98,25 @@ async function openEditModal(domain, sam) {
 async function loadUsers(){
   try {
     const data = await api('/api/admin/users');
+    const tbody = $('#users tbody').empty();
+
+    // Add robust checking for the response data
+    if (!data || !Array.isArray(data)) {
+        console.error('Received invalid data from /api/admin/users:', data);
+        const colCount = $('#users thead th').length;
+        tbody.append(`<tr><td colspan="${colCount}" class="text-center text-danger py-4">Error: Received an invalid response from the server.</td></tr>`);
+        showInfo('Error Loading Users', 'The server returned an invalid response. Please check the application logs for more details.');
+        return;
+    }
+
+    if (data.length === 0) {
+        const colCount = $('#users thead th').length;
+        tbody.append(`<tr><td colspan="${colCount}" class="text-center text-muted py-4">No users found. Please check your application's SearchBaseOus configuration.</td></tr>`);
+        return; // No users to display
+    }
+
     const q = ($('#q').val() || '').toLowerCase();
     const domFilter = ($('#u_domain').val() || '');
-    const tbody = $('#users tbody').empty();
 
     const adminBaseSet = new Set(
       data
@@ -108,10 +124,17 @@ async function loadUsers(){
         .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
     );
 
-    data
+    const filteredData = data
       .filter(u => !domFilter || u.domain === domFilter)
-      .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q))
-      .forEach(u => {
+      .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q));
+
+    if (filteredData.length === 0) {
+        const colCount = $('#users thead th').length;
+        tbody.append(`<tr><td colspan="${colCount}" class="text-center text-muted py-4">No users found matching the filter criteria.</td></tr>`);
+        return;
+    }
+    
+    filteredData.forEach(u => {
         const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
         const isPriv = !!u.isPrivileged;
         const base = (u.samAccountName || '').toLowerCase();
@@ -176,6 +199,9 @@ async function loadUsers(){
 
     initTooltips(document);
   } catch (err) {
+      const tbody = $('#users tbody').empty();
+      const colCount = $('#users thead th').length;
+      tbody.append(`<tr><td colspan="${colCount}" class="text-center text-danger py-4">Failed to load users. See logs for details.</td></tr>`);
       showInfo('Error Loading Users', `There was a problem retrieving the user list from the server. Please check the application logs for more details.<br><br><i><small>${err.message || 'No additional details available.'}</small></i>`);
   }
 }
