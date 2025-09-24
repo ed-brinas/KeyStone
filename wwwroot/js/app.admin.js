@@ -76,39 +76,214 @@ async function loadOptionalGroups(domain) {
     }
 }
 
+// -------- Edit User Modal --------
+async function openEditModal(domain, sam) {
+    try {
+        const user = await api(`/api/admin/user-details?domain=${encodeURIComponent(domain)}&sam=${encodeURIComponent(sam)}`);
+        $('#e_domain').val(user.domain);
+        $('#e_sam').val(user.samAccountName);
+        $('#e_fn').val(user.firstName);
+        $('#e_ln').val(user.lastName);
+        $('#e_dob').val(user.birthdate);
+        $('#e_exp').val(user.expirationDate ? user.expirationDate.split('T')[0] : '');
+        $('#e_mobile').val(user.mobileNumber);
+        
+        new bootstrap.Modal(document.getElementById('editUserModal')).show();
+    } catch (err) {
+        showInfo('Error', `Failed to load user details. ${err.message || ''}`);
+    }
+}
 
 // -------- Users grid --------
 async function loadUsers(){
-  // ... existing loadUsers implementation ...
+  const data = await api('/api/admin/users');
+  const q = ($('#q').val() || '').toLowerCase();
+  const domFilter = ($('#u_domain').val() || '');
+  const tbody = $('#users tbody').empty();
+
+  const adminBaseSet = new Set(
+    data
+      .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
+      .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
+  );
+
+  data
+    .filter(u => !domFilter || u.domain === domFilter)
+    .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q))
+    .forEach(u => {
+      const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
+      const isPriv = !!u.isPrivileged;
+      const base = (u.samAccountName || '').toLowerCase();
+      const hasAdmin = !isPriv && adminBaseSet.has(base);
+      const adminBadgeHtml = isPriv
+        ? '<span class="badge bg-secondary">—</span>'
+        : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
+
+      const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
+      
+      if (!isPriv) {
+          actions.append(
+            $('<button class="btn-icon text-info me-2" aria-label="Edit" data-bs-toggle="tooltip" title="Edit User"><i class="bi bi-pencil-square"></i></button>')
+              .click(() => openEditModal(u.domain, u.samAccountName))
+          );
+      }
+
+      actions.append(
+        $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
+          .click(async () => {
+            const ok = await confirmAction('Unlock Account', `Unlock <code>${u.samAccountName}</code> on <code>${u.domain}</code>?`);
+            if (!ok) return;
+            await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName, unlock: true});
+            showInfo('Unlocked', `Account <code>${u.samAccountName}</code> was unlocked.`);
+            loadUsers();
+          })
+      );
+      actions.append(
+        $('<button class="btn-icon text-primary me-2" aria-label="Reset Password" data-bs-toggle="tooltip" title="Reset Password"><i class="bi bi-key"></i></button>')
+          .click(async () => {
+            const ok = await confirmAction('Reset Password', `Reset password for <code>${u.samAccountName}</code>? This will also unlock the account.`);
+            if (!ok) return;
+            const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:u.samAccountName,unlock:true});
+            showInfo('Password Reset', `New password for <code>${u.samAccountName}</code>:<br><code class="text-mono">${r.password}</code>`);
+            loadUsers();
+          })
+      );
+      if (!isPriv && hasAdmin) {
+        const adminSam = `${u.samAccountName}-a`;
+        actions.append(
+          $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
+            .click(async () => {
+              const ok = await confirmAction('Reset Admin Password', `Reset password for admin account <code>${adminSam}</code>?`);
+              if (!ok) return;
+              const r = await api('/api/admin/reset-password','POST',{domain:u.domain,samAccountName:adminSam,unlock:true});
+              showInfo('Admin Password Reset', `New password for <code>${adminSam}</code>:<br><code class="text-mono">${r.password}</code>`);
+              loadUsers();
+            })
+        );
+      }
+
+      const tr = $('<tr>');
+      tr.append(`<td>${u.domain}</td>`);
+      tr.append(`<td class="text-mono">${u.samAccountName}</td>`);
+      tr.append(`<td>${u.displayName}</td>`);
+      tr.append(`<td>${status}</td>`);
+      tr.append(`<td>${u.expirationDate ? u.expirationDate.split('T')[0] : 'Never'}</td>`);
+      tr.append(`<td class="text-center">${adminBadgeHtml}</td>`);
+      tr.append($('<td class="text-center">').append(actions));
+      tbody.append(tr);
+    });
+
+  initTooltips(document);
 }
 
 // -------- Form helpers --------
-function formDataOrInvalid() {
-  // ... existing formDataOrInvalid implementation ...
+function getCreateFormData() {
+  const form = document.getElementById('userForm');
+  if (!form.checkValidity()) {
+    form.classList.add('was-validated');
+    return null;
+  }
+  return {
+    domain: $('#c_domain').val(),
+    firstName: $('#c_fn').val(),
+    lastName: $('#c_ln').val(),
+    birthdate: $('#c_dob').val(),
+    expirationDate: $('#c_exp').val(),
+    mobileNumber: $('#c_mobile').val(),
+    samAccountName: $('#c_sam').val(),
+    createPrivileged: $('#c_priv').is(':checked'),
+    selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,
+    makeSelectedPrimary: $('#c_priv_primary').is(':checked'),
+    selectedGeneralAccessGroups: $('#c_general_groups').val() || [],
+    selectedPrivilegeAccessGroups: $('#c_priv_groups').val() || []
+  };
+}
+
+function getEditFormData() {
+  const form = document.getElementById('editUserForm');
+  if (!form.checkValidity()) {
+    form.classList.add('was-validated');
+    return null;
+  }
+  return {
+    domain: $('#e_domain').val(),
+    samAccountName: $('#e_sam').val(),
+    firstName: $('#e_fn').val(),
+    lastName: $('#e_ln').val(),
+    birthdate: $('#e_dob').val(),
+    expirationDate: $('#e_exp').val(),
+    mobileNumber: $('#e_mobile').val()
+  };
 }
 
 
 // -------- Created summary modal --------
 let __lastCreatePayload = null;
 function openCreatedSummaryModal(payload) {
-  // ... existing openCreatedSummaryModal implementation ...
+  __lastCreatePayload = payload;
+  const r = payload.result;
+  const a = payload.admin || { created:false };
+  const lines = [];
+  lines.push("=== Regular Account ===");
+  lines.push(`Domain            : ${r.domain}`);
+  lines.push(`Username (SAM)    : ${r.samAccountName}`);
+  lines.push(`Display Name      : ${r.displayName}`);
+  lines.push(`Mobile Number     : ${r.mobileNumber || '(not set)'}`);
+  lines.push(`OU                : ${r.ouCreatedIn}`);
+  lines.push(`Expires           : ${r.expirationDate ? r.expirationDate.split('T')[0] : "Never"}`);
+  lines.push(`Groups Added      : ${r.groupsAdded && r.groupsAdded.length ? r.groupsAdded.join(", ") : "(none)"}`);
+  lines.push(`Initial Password  : ${r.initialPassword}`);
+  lines.push("");
+  lines.push(`Must change password at next logon: Yes`);
+  if (a.created) {
+    lines.push("");
+    lines.push("=== Admin Account (-a) ===");
+    lines.push(`Username (SAM)    : ${a.sam}`);
+    lines.push(`Initial Password  : ${a.password}`);
+    lines.push(`Note              : Admin account does not expire and is not forced to change password.`);
+  }
+  document.getElementById('createdModalPre').textContent = lines.join('\n');
+  new bootstrap.Modal(document.getElementById('createdModal')).show();
 }
 async function copyCreatedSummaryToClipboard() {
-  // ... existing copyCreatedSummaryToClipboard implementation ...
+  const text = document.getElementById('createdModalPre').textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    showInfo('Copied', 'The summary has been copied to your clipboard.');
+  } catch {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); showInfo('Copied', 'The summary has been copied to your clipboard.'); }
+    finally { document.body.removeChild(ta); }
+  }
 }
 async function exportCreatedPdf() {
-  // ... existing exportCreatedPdf implementation ...
+  if (!__lastCreatePayload || !__lastCreatePayload.result) return;
+  await api('/api/admin/create-user/export-pdf', 'POST', __lastCreatePayload.result);
 }
 
 // -------- Audit Log Modal Logic --------
 async function loadAndDisplayLogs() {
-    // ... existing loadAndDisplayLogs implementation ...
+    try {
+        const r = await api('/api/admin/logs');
+        $('#logs').text(r.entries.join('\n'));
+    } catch (err) {
+        $('#logs').text(`Failed to load logs: ${err.message || 'Unknown error'}`);
+    }
 }
 
-
 // -------- Wire up buttons --------
+$('#createUserBtn').click(() => {
+    // Reset form for new entry
+    document.getElementById('userForm').classList.remove('was-validated');
+    document.getElementById('userForm').reset();
+    $('#c_priv_container').toggle(userPermissions.canCreatePrivileged);
+    $('#privileged-options').hide();
+    const domain = $('#c_domain').val();
+    loadOptionalGroups(domain);
+});
+
 $('#create').click(async ()=>{
-  const body = formDataOrInvalid();
+  const body = getCreateFormData();
   if (!body) return;
   const ok = await confirmAction('Create User', 'Proceed to create this user? A summary with credentials will be shown.');
   if (!ok) return;
@@ -117,8 +292,6 @@ $('#create').click(async ()=>{
     openCreatedSummaryModal(payload);
     loadUsers();
     bootstrap.Modal.getInstance(document.getElementById('userFormModal')).hide();
-    document.getElementById('userForm').reset();
-    $('#privileged-options').hide();
   } catch (err) {
       if (err.status === 403) {
           showInfo('Permission Denied', 'You do not have permission to create a privileged account.');
@@ -128,7 +301,41 @@ $('#create').click(async ()=>{
   }
 });
 
-// ... other button wiring ...
+$('#saveEdit').click(async () => {
+    const body = getEditFormData();
+    if (!body) return;
+    try {
+        await api('/api/admin/update-user', 'POST', body);
+        showInfo('Success', `User <code>${body.samAccountName}</code> has been updated.`);
+        loadUsers();
+        bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+    } catch (err) {
+        showInfo('Error', `Failed to update user. ${err.message || ''}`);
+    }
+});
+
+
+$('#openLogsBtn').click(() => loadAndDisplayLogs());
+$('#refreshLogs').click(() => loadAndDisplayLogs());
+$('#refresh').click(loadUsers);
+$('#q').on('input', loadUsers);
+$('#logoutBtn').click(async () => {
+    await api('/api/admin/logout', 'POST');
+    window.location.href = '/';
+});
+
+document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
+document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
+
+// -------- Wire up form element events --------
+$('#c_domain').on('change', function(){
+  loadOptionalGroups(this.value);
+});
+
+$('#c_priv').on('change', function() {
+    $('#privileged-options').toggle(this.checked);
+});
+
 
 // -------- Init --------
 (async () => {
@@ -136,15 +343,10 @@ $('#create').click(async ()=>{
     await bootstrapSession(); 
     await checkPermissions();
   } catch(err) {
-      // If session fails, redirect to home page, as they are not authenticated.
       window.location.href = '/';
       return;
   }
   
-  if (!userPermissions.canCreatePrivileged) {
-      $('#c_priv_container').hide();
-  }
-
   await populateDomains();
   
   const initialDomain = $('#c_domain').val();
