@@ -71,10 +71,8 @@ namespace ADWebManager.Services
             var sam = req.SamAccountName!.Trim();
             var display = ToSentenceCase($"{req.FirstName} {req.LastName}");
 
-            // Regular password (12 chars + specials)
+            // Regular account
             var stdPass = _passwords.GenerateStandard();
-
-            // Create regular account (force change at next logon)
             var (userDn, userOu, _) = CreateAccountInternal(
                 d, sam, display, req, stdPass,
                 isPrivileged: false,
@@ -84,7 +82,7 @@ namespace ADWebManager.Services
             if (d.StandardGroups != null)
                 foreach (var g in d.StandardGroups) TryAddToGroup(d, sam, g, groupsAdded);
 
-            // Optional -a account
+            // Optional privileged (-a) account
             string? adminPass = null;
             if (req.CreatePrivileged)
             {
@@ -96,12 +94,26 @@ namespace ADWebManager.Services
                     isPrivileged: true,
                     expireAtLogon: false);
 
+                // Add all configured privileged groups (if any)
                 if (d.PrivilegedGroups != null)
                     foreach (var g in d.PrivilegedGroups) TryAddToGroup(d, adminSam, g, groupsAdded);
 
-                if (!string.IsNullOrWhiteSpace(d.PrivilegedPrimaryGroup))
+                // NEW: Add the selected privileged group (if provided and not already included)
+                if (!string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
+                    TryAddToGroup(d, adminSam, req.SelectedPrivilegedGroupCn, groupsAdded);
+
+                // Decide primary group:
+                // 1) If MakeSelectedPrimary==true and a SelectedPrivilegedGroupCn is provided → make it primary.
+                // 2) Else if config has a fallback PrivilegedPrimaryGroup → use that.
+                if (req.MakeSelectedPrimary && !string.IsNullOrWhiteSpace(req.SelectedPrivilegedGroupCn))
                 {
-                    TrySetPrimaryGroup(d, adminSam, d.PrivilegedPrimaryGroup);
+                    TrySetPrimaryGroup(d, adminSam, req.SelectedPrivilegedGroupCn!);
+                    // Optional: remove default "Domain Users"
+                    TryRemoveFromGroup(d, adminSam, "Domain Users");
+                }
+                else if (!string.IsNullOrWhiteSpace(d.PrivilegedPrimaryGroup))
+                {
+                    TrySetPrimaryGroup(d, adminSam, d.PrivilegedPrimaryGroup!);
                     TryRemoveFromGroup(d, adminSam, "Domain Users");
                 }
             }
@@ -120,9 +132,10 @@ namespace ADWebManager.Services
                 InitialPassword = stdPass,
                 AdminInitialPassword = adminPass,
                 HasPrivileged = req.CreatePrivileged,
-                GroupsAdded = groupsAdded.ToArray()
+                GroupsAdded = groupsAdded.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
             };
         }
+
 
         public void UpdateUser(UpdateUserRequest req, string caller)
         {

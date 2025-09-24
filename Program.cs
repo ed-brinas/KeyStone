@@ -119,6 +119,15 @@ app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, Audi
     }
 }).AllowAnonymous();
 
+// Returns the configured privileged groups for a domain (from appsettings)
+app.MapGet("/api/config/privileged-groups", (HttpContext ctx, Microsoft.Extensions.Options.IOptions<AdOptions> ao) =>
+{
+    var domain = ctx.Request.Query["domain"].ToString();
+    var d = (ao.Value?.Domains ?? new()).FirstOrDefault(x => x.Name.Equals(domain, StringComparison.OrdinalIgnoreCase));
+    if (d == null) return Results.Ok(Array.Empty<string>());
+    return Results.Ok(d.PrivilegedGroups ?? Array.Empty<string>());
+}).AllowAnonymous();
+
 // -------- Admin (Windows auth) --------
 app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, HttpContext ctx) =>
 {
@@ -267,7 +276,8 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
 }).RequireAuthorization("AdminOnly");
 
 // Logs tail
-app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() }))
-   .RequireAuthorization("AdminOnly");
+app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization("AdminOnly");
+
+
 
 app.Run();

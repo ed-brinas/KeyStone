@@ -7,7 +7,7 @@
   const s = document.createElement('style'); s.textContent = css; document.head.appendChild(s);
 })();
 
-// Modals
+// -------- Modals --------
 function showInfo(title, html) {
   document.getElementById('infoModalTitle').textContent = title || 'Notice';
   document.getElementById('infoModalBody').innerHTML = html || '';
@@ -33,7 +33,7 @@ function initTooltips(scope=document) {
   list.forEach(el => new bootstrap.Tooltip(el, { container: 'body' }));
 }
 
-// Domains
+// -------- Domains & privileged groups --------
 async function populateDomains() {
   let domains = [];
   try { domains = await api('/api/config/domains'); } catch {}
@@ -46,14 +46,30 @@ async function populateDomains() {
   $('#c_domain').html(opts(domains));
   $('#u_domain').html(opts(domains, true)).on('change', loadUsers);
 }
+async function loadPrivilegedGroupsFor(domain) {
+  $('#c_priv_group').empty();
+  if (!domain) return;
+  try {
+    const groups = await api('/api/config/privileged-groups?domain=' + encodeURIComponent(domain));
+    if (Array.isArray(groups) && groups.length) {
+      $('#c_priv_group').append('<option value="">(none)</option>');
+      groups.forEach(g => $('#c_priv_group').append(`<option value="${g}">${g}</option>`));
+    } else {
+      $('#c_priv_group').append('<option value="">(none)</option>');
+    }
+  } catch {
+    $('#c_priv_group').append('<option value="">(none)</option>');
+  }
+}
 
-// Users grid
+// -------- Users grid --------
 async function loadUsers(){
   const data = await api('/api/admin/users');
   const q = ($('#q').val() || '').toLowerCase();
   const domFilter = ($('#u_domain').val() || '');
   const tbody = $('#users tbody').empty();
 
+  // Build set of base users that have -a accounts
   const adminBaseSet = new Set(
     data
       .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
@@ -141,6 +157,7 @@ async function loadUsers(){
   initTooltips(document);
 }
 
+// -------- Form helpers --------
 function formDataOrInvalid() {
   const form = document.getElementById('userForm');
   if (!form.checkValidity()) { form.classList.add('was-validated'); return null; }
@@ -150,13 +167,15 @@ function formDataOrInvalid() {
     lastName: $('#c_ln').val(),
     birthdate: $('#c_dob').val(),
     expirationDate: $('#c_exp').val(),
-    mobileNumber: $('#c_mobile').val(),   // ← include mobile
+    mobileNumber: $('#c_mobile').val(),
     samAccountName: $('#c_sam').val(),
-    createPrivileged: $('#c_priv').is(':checked')
+    createPrivileged: $('#c_priv').is(':checked'),
+    selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,  // NEW
+    makeSelectedPrimary: $('#c_priv_primary').is(':checked')      // NEW
   };
 }
 
-// Created summary modal
+// -------- Created summary modal --------
 let __lastCreatePayload = null;
 function openCreatedSummaryModal(payload) {
   __lastCreatePayload = payload;
@@ -167,7 +186,7 @@ function openCreatedSummaryModal(payload) {
   lines.push(`Domain            : ${r.domain}`);
   lines.push(`Username (SAM)    : ${r.samAccountName}`);
   lines.push(`Display Name      : ${r.displayName}`);
-  lines.push(`Mobile Number     : ${r.mobileNumber || '(not set)'}`); // ← show mobile
+  lines.push(`Mobile Number     : ${r.mobileNumber || '(not set)'}`);
   lines.push(`OU                : ${r.ouCreatedIn}`);
   lines.push(`Enabled/Locked    : ${r.enabled ? "Enabled" : "Disabled"} / ${r.isLocked ? "Locked" : "Unlocked"}`);
   lines.push(`Expires           : ${r.expirationDate || "(none)"}`);
@@ -185,7 +204,6 @@ function openCreatedSummaryModal(payload) {
   document.getElementById('createdModalPre').textContent = lines.join('\n');
   new bootstrap.Modal(document.getElementById('createdModal')).show();
 }
-
 async function copyCreatedSummaryToClipboard() {
   const text = document.getElementById('createdModalPre').textContent;
   try {
@@ -202,7 +220,7 @@ async function exportCreatedPdf() {
   await api('/api/admin/create-user/export-pdf', 'POST', __lastCreatePayload.result);
 }
 
-// Create / Update
+// -------- Wire up buttons --------
 $('#create').click(async ()=>{
   const body = formDataOrInvalid();
   if (!body) return;
@@ -227,5 +245,17 @@ $('#q').on('input', loadUsers);
 document.getElementById('copyCreatedSummary').addEventListener('click', copyCreatedSummaryToClipboard);
 document.getElementById('exportCreatedPdf').addEventListener('click', exportCreatedPdf);
 
-// Init
-(async () => { await populateDomains(); await loadUsers(); })();
+// React to domain change for privileged groups (and maybe reload users)
+$('#c_domain').on('change', function(){
+  loadPrivilegedGroupsFor(this.value);
+});
+
+// -------- Init --------
+(async () => {
+  // Ensure session/CSRF cookie exists (app.js also tries, this is just explicit)
+  try { await bootstrapSession(); } catch {}
+  await populateDomains();
+  const d = $('#c_domain').val();
+  await loadPrivilegedGroupsFor(d);
+  await loadUsers();
+})();
