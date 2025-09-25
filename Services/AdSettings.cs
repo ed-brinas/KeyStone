@@ -10,6 +10,9 @@ namespace ADWebManager.Services
         public AdHealthSettings Health { get; set; } = new();
         public AdSecuritySettings Security { get; set; } = new();
         public AdAuditSettings Audit { get; set; } = new();
+        public PasswordPolicy PasswordPolicy { get; set; } = new();
+        public string? BirthdateAttribute { get; set; }
+        public int PrivilegedAccountValidityDays { get; set; } = 90;
     }
 
     public class AdDomainSettings
@@ -26,17 +29,9 @@ namespace ADWebManager.Services
         public string ServiceAccountPassword { get; set; } = string.Empty;
         public List<string> OptionalGeneralAccessGroup { get; set; } = new();
         public List<string> OptionalPrivilegeGroup { get; set; } = new();
-        public PasswordPolicySettings PasswordPolicy { get; set; } = new();
-    }
-
-    public class PasswordPolicySettings
-    {
-        public int MinLength { get; set; } = 12;
-        public int MaxLength { get; set; } = 64;
-        public bool RequireUppercase { get; set; } = true;
-        public bool RequireLowercase { get; set; } = true;
-        public bool RequireNumber { get; set; } = true;
-        public bool RequireSymbol { get; set; } = true;
+        public string DefaultUserOuFormat { get; set; } = string.Empty;
+        public string AdminUserOuFormat { get; set; } = string.Empty;
+        public List<string> SearchBaseOus { get; set; } = new();
     }
 
     public class AdAccessControlSettings
@@ -77,5 +72,21 @@ namespace ADWebManager.Services
     public class AuditFileSettings
     {
         public string Path { get; set; } = string.Empty;
+    }
+
+    // --- Added missing PasswordPolicy classes ---
+    public class PasswordPolicy
+    {
+        public PasswordPolicyDetail Standard { get; set; } = new();
+        public PasswordPolicyDetail Admin { get; set; } = new();
+    }
+
+    public class PasswordPolicyDetail
+    {
+        public int Length { get; set; } = 14;
+        public bool IncludeLetters { get; set; } = true;
+        public bool IncludeDigits { get; set; } = true;
+        public bool IncludeSpecials { get; set; } = true;
+        public string AllowedSpecials { get; set; } = "!@#$%^&*()";
     }
 }
