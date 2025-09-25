@@ -17,51 +17,43 @@ namespace ADWebManager.Services
 
         public string Generate()
         {
-            var policy = _cfg.Provisioning.PasswordPolicy;
+            // Note: This is a simple password generator. For production, consider a more robust library.
+            var policy = _cfg.PasswordPolicy.Standard; 
             const string lowers = "abcdefghijklmnopqrstuvwxyz";
             const string uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             const string numbers = "0123456789";
             const string symbols = "!@#$%^&*()_+-=[]{}|;':,./<>?";
 
             var charPool = new StringBuilder();
-            if (policy.RequireLowercase) charPool.Append(lowers);
-            if (policy.RequireUppercase) charPool.Append(uppers);
-            if (policy.RequireNumber) charPool.Append(numbers);
-            if (policy.RequireSymbol) charPool.Append(symbols);
+            if (policy.IncludeLetters) charPool.Append(lowers).Append(uppers);
+            if (policy.IncludeDigits) charPool.Append(numbers);
+            if (policy.IncludeSpecials) charPool.Append(symbols);
             
             if (charPool.Length == 0) throw new Exception("Password policy is too restrictive to generate a password.");
 
             var random = new Random();
             var password = new StringBuilder();
             
-            // Ensure at least one of each required character type
-            if (policy.RequireLowercase) password.Append(lowers[random.Next(lowers.Length)]);
-            if (policy.RequireUppercase) password.Append(uppers[random.Next(uppers.Length)]);
-            if (policy.RequireNumber) password.Append(numbers[random.Next(numbers.Length)]);
-            if (policy.RequireSymbol) password.Append(symbols[random.Next(symbols.Length)]);
-
-            // Fill the rest of the password length
-            for (int i = password.Length; i < policy.MinLength; i++)
+            // Fill the password length
+            for (int i = password.Length; i < policy.Length; i++)
             {
                 password.Append(charPool[random.Next(charPool.Length)]);
             }
 
-            // Shuffle the password to randomize character positions
-            return new string(password.ToString().ToCharArray().OrderBy(c => random.Next()).ToArray());
+            return password.ToString();
         }
 
         public (bool, string[]) CheckStrengthForUser(string sam, string password)
         {
             // This is a placeholder for a real strength check.
             // In a real application, you would check against the domain's actual password policy.
-            var policy = _cfg.Provisioning.PasswordPolicy;
+            var policy = _cfg.PasswordPolicy.Standard;
             var problems = new System.Collections.Generic.List<string>();
 
-            if (password.Length < policy.MinLength) problems.Add($"Password must be at least {policy.MinLength} characters long.");
-            if (policy.RequireUppercase && !password.Any(char.IsUpper)) problems.Add("Password must contain at least one uppercase letter.");
-            if (policy.RequireLowercase && !password.Any(char.IsLower)) problems.Add("Password must contain at least one lowercase letter.");
-            if (policy.RequireNumber && !password.Any(char.IsDigit)) problems.Add("Password must contain at least one number.");
-            if (policy.RequireSymbol && !password.Any(c => !char.IsLetterOrDigit(c))) problems.Add("Password must contain at least one symbol.");
+            if (password.Length < policy.Length) problems.Add($"Password must be at least {policy.Length} characters long.");
+            if (policy.IncludeLetters && !password.Any(char.IsLetter)) problems.Add("Password must contain at least one letter.");
+            if (policy.IncludeDigits && !password.Any(char.IsDigit)) problems.Add("Password must contain at least one number.");
+            if (policy.IncludeSpecials && !password.Any(c => !char.IsLetterOrDigit(c))) problems.Add("Password must contain at least one symbol.");
 
             return (problems.Count == 0, problems.ToArray());
         }

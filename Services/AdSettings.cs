@@ -10,7 +10,6 @@ namespace ADWebManager.Services
         public AdHealthSettings Health { get; set; } = new();
         public AdSecuritySettings Security { get; set; } = new();
         public AdAuditSettings Audit { get; set; } = new();
-        public PasswordPolicy PasswordPolicy { get; set; } = new();
         public string? BirthdateAttribute { get; set; }
         public int PrivilegedAccountValidityDays { get; set; } = 90;
     }
@@ -32,6 +31,7 @@ namespace ADWebManager.Services
         public string DefaultUserOuFormat { get; set; } = string.Empty;
         public string AdminUserOuFormat { get; set; } = string.Empty;
         public List<string> SearchBaseOus { get; set; } = new();
+        public PasswordPolicy PasswordPolicy { get; set; } = new();
     }
 
     public class AdAccessControlSettings
@@ -73,8 +73,7 @@ namespace ADWebManager.Services
     {
         public string Path { get; set; } = string.Empty;
     }
-
-    // --- Added missing PasswordPolicy classes ---
+    
     public class PasswordPolicy
     {
         public PasswordPolicyDetail Standard { get; set; } = new();

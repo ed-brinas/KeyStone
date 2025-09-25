@@ -264,7 +264,7 @@ namespace ADWebManager.Services
                 LastName = user.Surname,
                 Enabled = user.Enabled ?? false,
                 IsLocked = user.IsAccountLockedOut(),
-                ExpirationDate = user.AccountExpirationDate,
+                ExpirationDate = user.AccountExpirationDate.HasValue ? DateOnly.FromDateTime(user.AccountExpirationDate.Value) : null,
                 Birthdate = birthdate,
                 MobileNumber = de.Properties["mobile"]?.Value as string
             };
@@ -319,8 +319,6 @@ namespace ADWebManager.Services
             user.Save();
         }
 
-
-
         public async Task SelfServiceResetPasswordAsync(SelfServiceResetRequest req)
         {
             if (req.SamAccountName.EndsWith("-a", StringComparison.OrdinalIgnoreCase))
@@ -370,8 +368,6 @@ namespace ADWebManager.Services
             de.MoveTo(parent);
             de.CommitChanges();
         }
-
-
 
         private static void Require(bool ok, string msg) { if (!ok) throw new Exception(msg); }
 
