@@ -53,6 +53,8 @@ builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNe
 
 builder.Services.AddAuthorization(o =>
 {
+    // Temporarily build service provider to read settings for authorization setup.
+    // This is done once at startup.
     var serviceProvider = builder.Services.BuildServiceProvider();
     var adSettings = serviceProvider.GetRequiredService<IOptions<AdSettings>>().Value;
     
@@ -60,9 +62,11 @@ builder.Services.AddAuthorization(o =>
     var highPrivilegeGroups = adSettings.AccessControl?.HighPrivilegeGroups ?? new List<string>();
     var allAdminGroups = generalGroups.Concat(highPrivilegeGroups).Distinct().ToArray();
 
+    // Policy for general access to the admin portal
     o.AddPolicy("AdminPortalAccess", policy => 
         policy.RequireRole(allAdminGroups));
         
+    // Policy for actions requiring high privileges (e.g., creating admin accounts)
     o.AddPolicy("PrivilegedAdmin", policy => 
         policy.RequireRole(highPrivilegeGroups));
 });
@@ -95,9 +99,11 @@ app.MapPost("/api/admin/logout", (HttpContext ctx, SecurityService sec) =>
 }).Authorize("AdminPortalAccess");
 
 // --- Permissions check endpoint ---
-app.MapGet("/api/session/permissions", (HttpContext ctx) =>
+app.MapGet("/api/session/permissions", (HttpContext ctx, IOptions<AdSettings> cfg) =>
 {
-    var canCreatePrivileged = ctx.User.IsInRole("PrivilegedAdmin");
+    // Correctly check if the user is in any of the high privilege groups
+    var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
+    var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
     return Results.Ok(new { canCreatePrivileged });
 }).Authorize("AdminPortalAccess");
 
@@ -226,15 +232,20 @@ app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, Audi
     }
 }).AllowAnonymous();
 
-app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
+app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit, IOptions<AdSettings> cfg) =>
 {
     var caller = Caller(ctx);
     try
     {
         var req = await ReadJson<CreateUserRequest>(ctx);
         
-        if (req.CreatePrivileged && !ctx.User.HasClaim(c => c.Type == ClaimTypes.Role && (ctx.RequestServices.GetRequiredService<IOptions<AdSettings>>().Value.AccessControl.HighPrivilegeGroups ?? new()).Contains(c.Value))))
+        // Refactored permission check for clarity and correctness
+        var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
+        var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
+
+        if (req.CreatePrivileged && !canCreatePrivileged)
         {
+            audit.Write(caller, "create", req.SamAccountName, false, "Forbidden: insufficient privilege to create admin account.", RemoteIp(ctx));
             return Results.Forbid();
         }
 
