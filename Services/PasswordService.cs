@@ -1,13 +1,11 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using ADWebManager.Services;
+using System.Text;
+using ADWebManager.Models;
 using Microsoft.Extensions.Options;
 
 namespace ADWebManager.Services
 {
-    public enum PolicyBucket { Standard, Admin }
-
     public class PasswordService
     {
         private readonly AdSettings _cfg;
@@ -17,38 +15,55 @@ namespace ADWebManager.Services
             _cfg = cfg.Value;
         }
 
-        public (bool, IReadOnlyList<string>) CheckStrengthForUser(string sam, string password)
+        public string Generate()
         {
-            var isAdmin = sam.EndsWith("-a", StringComparison.OrdinalIgnoreCase);
-            var policy = isAdmin ? _cfg.PasswordPolicy?.Admin : _cfg.PasswordPolicy?.Standard;
-            var bucket = isAdmin ? PolicyBucket.Admin : PolicyBucket.Standard;
+            var policy = _cfg.Provisioning.PasswordPolicy;
+            const string lowers = "abcdefghijklmnopqrstuvwxyz";
+            const string uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const string numbers = "0123456789";
+            const string symbols = "!@#$%^&*()_+-=[]{}|;':,./<>?";
 
-            return CheckStrength(password, bucket);
-        }
-
-        public (bool, IReadOnlyList<string>) CheckStrength(string password, PolicyBucket bucket)
-        {
-            var policy = bucket == PolicyBucket.Admin ? _cfg.PasswordPolicy?.Admin : _cfg.PasswordPolicy?.Standard;
-            if (policy == null) return (true, new List<string>()); 
-
-            var problems = new List<string>();
-            if (string.IsNullOrEmpty(password) || password.Length < policy.Length)
-                problems.Add($"Password must be at least {policy.Length} characters long.");
-
-            if (policy.IncludeLetters && !password.Any(char.IsLetter))
-                problems.Add("Password must include letters.");
-
-            if (policy.IncludeDigits && !password.Any(char.IsDigit))
-                problems.Add("Password must include digits.");
+            var charPool = new StringBuilder();
+            if (policy.RequireLowercase) charPool.Append(lowers);
+            if (policy.RequireUppercase) charPool.Append(uppers);
+            if (policy.RequireNumber) charPool.Append(numbers);
+            if (policy.RequireSymbol) charPool.Append(symbols);
             
-            if (policy.IncludeSpecials)
+            if (charPool.Length == 0) throw new Exception("Password policy is too restrictive to generate a password.");
+
+            var random = new Random();
+            var password = new StringBuilder();
+            
+            // Ensure at least one of each required character type
+            if (policy.RequireLowercase) password.Append(lowers[random.Next(lowers.Length)]);
+            if (policy.RequireUppercase) password.Append(uppers[random.Next(uppers.Length)]);
+            if (policy.RequireNumber) password.Append(numbers[random.Next(numbers.Length)]);
+            if (policy.RequireSymbol) password.Append(symbols[random.Next(symbols.Length)]);
+
+            // Fill the rest of the password length
+            for (int i = password.Length; i < policy.MinLength; i++)
             {
-                var allowed = policy.AllowedSpecials ?? "";
-                if (!password.Any(c => allowed.Contains(c)))
-                    problems.Add($"Password must include at least one special character: {allowed}");
+                password.Append(charPool[random.Next(charPool.Length)]);
             }
 
-            return (!problems.Any(), problems);
+            // Shuffle the password to randomize character positions
+            return new string(password.ToString().ToCharArray().OrderBy(c => random.Next()).ToArray());
+        }
+
+        public (bool, string[]) CheckStrengthForUser(string sam, string password)
+        {
+            // This is a placeholder for a real strength check.
+            // In a real application, you would check against the domain's actual password policy.
+            var policy = _cfg.Provisioning.PasswordPolicy;
+            var problems = new System.Collections.Generic.List<string>();
+
+            if (password.Length < policy.MinLength) problems.Add($"Password must be at least {policy.MinLength} characters long.");
+            if (policy.RequireUppercase && !password.Any(char.IsUpper)) problems.Add("Password must contain at least one uppercase letter.");
+            if (policy.RequireLowercase && !password.Any(char.IsLower)) problems.Add("Password must contain at least one lowercase letter.");
+            if (policy.RequireNumber && !password.Any(char.IsDigit)) problems.Add("Password must contain at least one number.");
+            if (policy.RequireSymbol && !password.Any(c => !char.IsLetterOrDigit(c))) problems.Add("Password must contain at least one symbol.");
+
+            return (problems.Count == 0, problems.ToArray());
         }
     }
 }
