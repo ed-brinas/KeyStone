@@ -96,7 +96,7 @@ app.MapPost("/api/admin/logout", (HttpContext ctx, SecurityService sec) =>
 {
     sec.DestroySession(ctx);
     return Results.Ok(new { ok = true, message = "Logged out" });
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 // --- Permissions check endpoint ---
 app.MapGet("/api/session/permissions", (HttpContext ctx, IOptions<AdSettings> cfg) =>
@@ -105,7 +105,7 @@ app.MapGet("/api/session/permissions", (HttpContext ctx, IOptions<AdSettings> cf
     var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
     var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
     return Results.Ok(new { canCreatePrivileged });
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 
 // --- CSRF guard for unsafe admin calls ---
@@ -178,7 +178,7 @@ app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, Ht
         audit.Write(Caller(ctx), "health", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogService audit, IOptions<AdSettings> cfg) =>
 {
@@ -197,7 +197,7 @@ app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogServic
         audit.Write(Caller(ctx), "users", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapGet("/api/admin/user-details", (string domain, string sam, AdService adSvc, AuditLogService audit, HttpContext ctx) =>
 {
@@ -211,7 +211,7 @@ app.MapGet("/api/admin/user-details", (string domain, string sam, AdService adSv
         audit.Write(Caller(ctx), "user-details", $"{domain}\\{sam}", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
@@ -264,7 +264,7 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
         audit.Write(caller, "create", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
 {
@@ -280,7 +280,7 @@ app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfServ
         audit.Write(caller, "export-pdf", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
@@ -297,7 +297,7 @@ app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, Audi
         audit.Write(caller, "update", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
 app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
@@ -336,9 +336,9 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
         audit.Write(caller, "reset-password", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).Authorize("AdminPortalAccess");
+}).RequireAuthorization("AdminPortalAccess");
 
-app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).Authorize("AdminPortalAccess");
+app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization("AdminPortalAccess");
 
 app.Run();
 
