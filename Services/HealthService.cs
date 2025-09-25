@@ -31,6 +31,9 @@ namespace ADWebManager.Services
             };
         }
 
+
+
+
         private DcCheckResult CheckDc(DcTarget dc)
         {
             var sw = Stopwatch.StartNew();
