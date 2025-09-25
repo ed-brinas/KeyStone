@@ -33,8 +33,14 @@ builder.Services.AddSingleton<AuditLogService>(sp =>
     return new AuditLogService(new AuditLogOptions { Directory = Path.GetDirectoryName(dir) ?? "logs" });
 });
 
-builder.Services.AddSingleton<PasswordService>(sp =>
-    new PasswordService(sp.GetRequiredService<IOptions<AdSettings>>()));
+// Correctly register PasswordService and its dependency IPasswordGenerator
+builder.Services.AddSingleton<IPasswordGenerator, ConfigurablePasswordGenerator>(sp =>
+{
+    var adSettings = sp.GetRequiredService<IOptions<AdSettings>>().Value;
+    return new ConfigurablePasswordGenerator(adSettings.Provisioning.PasswordPolicy);
+});
+builder.Services.AddSingleton<PasswordService>();
+
 
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddSingleton<AdService>();
@@ -57,7 +63,6 @@ builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNe
 // Correctly configure Authorization by binding settings directly from IConfiguration
 builder.Services.AddAuthorization(o =>
 {
-    // Bind AdSettings from configuration to access AccessControl
     var adSettings = new AdSettings();
     builder.Configuration.GetSection("AdSettings").Bind(adSettings);
     
@@ -194,35 +199,27 @@ app.MapGet("/api/config/optional-groups", (HttpContext ctx, IOptions<AdSettings>
 }).AllowAnonymous();
 
 // -------- Admin (Windows auth) --------
-app.MapGet("/api/admin/health", async (HealthService health, AuditLogService audit, HttpContext ctx) =>
+app.MapGet("/api/admin/health", async (HealthService health) =>
 {
     var report = await health.GetReportAsync();
     return Results.Ok(new { ok = true, report }); 
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
-app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogService audit, IOptions<AdSettings> cfg) =>
+app.MapGet("/api/admin/users", (string? domain, AdService adSvc) =>
 {
-    var ad = cfg.Value ?? new AdSettings();
-    var queryDomain = ctx.Request.Query["domain"].ToString();
-    var results = new System.Collections.Generic.List<UserRow>();
-    var domains = string.IsNullOrWhiteSpace(queryDomain) ? AllDomains(ad) : new[] { queryDomain };
-
-    foreach (var d in domains) results.AddRange(adSvc.ListUsers(d));
+    var results = adSvc.ListUsers(domain);
     return Results.Ok(results);
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
-app.MapGet("/api/admin/user-details", (string domain, string sam, AdService adSvc, AuditLogService audit, HttpContext ctx) =>
+app.MapGet("/api/admin/user-details", (string domain, string sam, AdService adSvc) =>
 {
     var user = adSvc.GetUserDetails(domain, sam);
     return Results.Ok(user);
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
-app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
+app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var req = await ReadJson<SelfServiceResetRequest>(ctx);
-    var (ok, problems) = pw.CheckStrengthForUser(req.SamAccountName, req.NewPassword);
-    if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
-
     await ad.SelfServiceResetPasswordAsync(req);
     audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
     return Results.Ok(new { ok = true });
@@ -244,21 +241,19 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
 
     var result = ad.CreateUser(req, caller);
     
-    result.InitialPassword = string.Empty; 
-    result.AdminInitialPassword = null;
-
     var admin = new
     {
         created = req.CreatePrivileged,
         sam = req.CreatePrivileged ? result.SamAccountName + "-a" : null,
+        password = req.CreatePrivileged ? result.AdminInitialPassword : null
     };
+
     audit.Write(caller, "create", $"{result.Domain}\\{result.SamAccountName}", true, $"priv={req.CreatePrivileged}", RemoteIp(ctx));
     return Results.Ok(new { ok = true, result, admin });
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
-app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
+app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf) =>
 {
-    var caller = Caller(ctx);
     var r = await ReadJson<CreateUserResult>(ctx);
     var bytes = pdf.CreateSummary(r);
     return Results.File(bytes, "application/pdf", $"acct-{r.SamAccountName}.pdf");
@@ -273,40 +268,30 @@ app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, Audi
     return Results.Ok(new { ok = true });
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
-app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
+app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
     using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
     var root = doc.RootElement;
 
-    if (!root.TryGetProperty("domain", out var domainProp) || domainProp.GetString() is not { } domain ||
-        !root.TryGetProperty("samAccountName", out var samProp) || samProp.GetString() is not { } sam)
-    {
-        return Results.BadRequest(new { ok = false, message = "Missing domain or samAccountName." });
-    }
-
+    var domain = root.GetProperty("domain").GetString()!;
+    var sam = root.GetProperty("samAccountName").GetString()!;
     var unlock = root.TryGetProperty("unlock", out var u) && u.GetBoolean();
 
-    string? newPassword = null;
-    if (root.TryGetProperty("newPassword", out var np) && np.ValueKind == JsonValueKind.String)
-        newPassword = np.GetString();
-
-    if (!string.IsNullOrWhiteSpace(newPassword))
+    if (root.TryGetProperty("newPassword", out var np) && np.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(np.GetString()))
     {
-        var (ok, problems) = pw.CheckStrengthForUser(sam, newPassword!);
-        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
-
-        ad.SetPassword(domain, sam, newPassword!, unlock);
+        ad.SetPassword(domain, sam, np.GetString()!, unlock);
         audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=true; unlock=" + unlock, RemoteIp(ctx));
         return Results.Ok(new { ok = true, generated = false });
     }
     else
     {
-        var generated = ad.ResetPassword(domain, sam, unlock);
+        var generatedPassword = ad.ResetPassword(domain, sam, unlock);
         audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=false; unlock=" + unlock, RemoteIp(ctx));
-        return Results.Ok(new { ok = true, generated = true, password = generated });
+        return Results.Ok(new { ok = true, generated = true, password = generatedPassword });
     }
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
+
 
 app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
