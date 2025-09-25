@@ -66,7 +66,7 @@ namespace ADWebManager.Services
         public AdService(IOptions<AdSettings> cfg)
         {
             _cfg = cfg.Value;
-            _pw = new ConfigurablePasswordGenerator(_cfg.PasswordPolicy ?? new PasswordPolicy());
+            _pw = new ConfigurablePasswordGenerator(_cfg.Provisioning.PasswordPolicy ?? new PasswordPolicy());
         }
 
         public CreateUserResult CreateUser(CreateUserRequest req, string caller)
@@ -136,13 +136,11 @@ namespace ADWebManager.Services
                 admin.PasswordNeverExpires = false;
                 admin.Save();
 
-                // Add to all selected privilege groups
                 foreach(var groupCn in req.SelectedPrivilegeAccessGroups)
                 {
                     TryAddToGroup(req.Domain, adminSam, groupCn, groupsAdded);
                 }
 
-                // If requested, set the first selected group as primary and remove from Domain Users
                 if (req.MakeSelectedPrimary && req.SelectedPrivilegeAccessGroups.Any())
                 {
                     var primaryGroup = req.SelectedPrivilegeAccessGroups.First();
@@ -255,6 +253,12 @@ namespace ADWebManager.Services
                 birthdate = dob;
             }
 
+            DateOnly? expirationDate = null;
+            if (user.AccountExpirationDate.HasValue)
+            {
+                expirationDate = DateOnly.FromDateTime(user.AccountExpirationDate.Value);
+            }
+
             return new UserDetails
             {
                 Domain = domain,
@@ -264,7 +268,7 @@ namespace ADWebManager.Services
                 LastName = user.Surname,
                 Enabled = user.Enabled ?? false,
                 IsLocked = user.IsAccountLockedOut(),
-                ExpirationDate = user.AccountExpirationDate.HasValue ? DateOnly.FromDateTime(user.AccountExpirationDate.Value) : null,
+                ExpirationDate = expirationDate,
                 Birthdate = birthdate,
                 MobileNumber = de.Properties["mobile"]?.Value as string
             };

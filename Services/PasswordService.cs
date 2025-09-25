@@ -17,8 +17,7 @@ namespace ADWebManager.Services
 
         public string Generate()
         {
-            // Note: This is a simple password generator. For production, consider a more robust library.
-            var policy = _cfg.PasswordPolicy.Standard; 
+            var policy = _cfg.Provisioning.PasswordPolicy.Standard;
             const string lowers = "abcdefghijklmnopqrstuvwxyz";
             const string uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             const string numbers = "0123456789";
@@ -34,7 +33,6 @@ namespace ADWebManager.Services
             var random = new Random();
             var password = new StringBuilder();
             
-            // Fill the password length
             for (int i = password.Length; i < policy.Length; i++)
             {
                 password.Append(charPool[random.Next(charPool.Length)]);
@@ -45,9 +43,7 @@ namespace ADWebManager.Services
 
         public (bool, string[]) CheckStrengthForUser(string sam, string password)
         {
-            // This is a placeholder for a real strength check.
-            // In a real application, you would check against the domain's actual password policy.
-            var policy = _cfg.PasswordPolicy.Standard;
+            var policy = _cfg.Provisioning.PasswordPolicy.Standard;
             var problems = new System.Collections.Generic.List<string>();
 
             if (password.Length < policy.Length) problems.Add($"Password must be at least {policy.Length} characters long.");
