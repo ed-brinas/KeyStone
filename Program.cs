@@ -341,4 +341,3 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
 app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization("AdminPortalAccess");
 
 app.Run();
-
