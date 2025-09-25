@@ -67,29 +67,38 @@ namespace ADWebManager.Services
             var d = _cfg.Domains.First(d => d.Name.Equals(req.Domain, StringComparison.OrdinalIgnoreCase));
 
             // Create standard user
-            var standardUser = CreateStandardUser(ctx, d, req, createdBy);
+            var standardUserPrincipal = CreateStandardUser(ctx, d, req, createdBy);
+
+            // Fetch the underlying DirectoryEntry to get fresh properties
+            var standardUserDe = (DirectoryEntry)standardUserPrincipal.GetUnderlyingObject();
 
             // Optionally create privileged user
             if (req.CreatePrivileged)
             {
-                CreatePrivilegedUser(ctx, d, req, standardUser);
+                CreatePrivilegedUser(ctx, d, req, standardUserPrincipal);
             }
+            
+            // Generate passwords
+            var initialPassword = _pwSvc.Generate();
+            var adminInitialPassword = req.CreatePrivileged ? _pwSvc.Generate() : null;
+            
+            standardUserPrincipal.SetPassword(initialPassword);
 
             return new CreateUserResult
             {
                 Domain = req.Domain,
-                SamAccountName = standardUser.SamAccountName,
-                DisplayName = standardUser.DisplayName,
-                DistinguishedName = standardUser.DistinguishedName,
+                SamAccountName = standardUserPrincipal.SamAccountName,
+                DisplayName = standardUserPrincipal.DisplayName,
+                DistinguishedName = standardUserPrincipal.DistinguishedName,
                 OuCreatedIn = d.UserOu,
-                Enabled = standardUser.Enabled ?? false,
-                IsLocked = standardUser.IsAccountLockedOut(),
-                ExpirationDate = standardUser.AccountExpirationDate ?? DateTime.MaxValue,
+                Enabled = standardUserPrincipal.Enabled ?? false,
+                IsLocked = standardUserPrincipal.IsAccountLockedOut(),
+                ExpirationDate = standardUserPrincipal.AccountExpirationDate ?? DateTime.MaxValue,
                 MobileNumber = req.MobileNumber,
-                InitialPassword = standardUser.GetPassword(),
-                AdminInitialPassword = req.CreatePrivileged ? standardUser.GetAdminPassword() : null,
+                InitialPassword = initialPassword,
+                AdminInitialPassword = adminInitialPassword,
                 HasPrivileged = req.CreatePrivileged,
-                GroupsAdded = standardUser.GetGroups().Select(g => g.Name).ToArray()
+                GroupsAdded = standardUserPrincipal.GetGroups().Select(g => g.Name).ToArray()
             };
         }
 
@@ -110,7 +119,6 @@ namespace ADWebManager.Services
             };
             
             user.Save();
-            user.SetPassword(_pwSvc.Generate());
 
             if (!string.IsNullOrWhiteSpace(req.MobileNumber))
             {
