@@ -42,8 +42,6 @@ namespace ADWebManager.Services
                 var result = new DcCheckResult { Domain = dc.Domain, Host = dc.Host, Status = "FAIL" };
                 try
                 {
-                    // For more robust timeout handling, consider setting the
-                    // .Timeout property on the DirectorySearcher object.
                     using var de = new DirectoryEntry($"LDAP://{dc.Host}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
                     de.RefreshCache(new[] { "serverName" });
 
