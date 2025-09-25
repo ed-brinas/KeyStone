@@ -100,7 +100,6 @@ async function loadUsers(){
     const data = await api('/api/admin/users');
     const tbody = $('#users tbody').empty();
 
-    // Add robust checking for the response data
     if (!data || !Array.isArray(data)) {
         console.error('Received invalid data from /api/admin/users:', data);
         const colCount = $('#users thead th').length;
@@ -112,7 +111,7 @@ async function loadUsers(){
     if (data.length === 0) {
         const colCount = $('#users thead th').length;
         tbody.append(`<tr><td colspan="${colCount}" class="text-center text-muted py-4">No users found. Please check your application's SearchBaseOus configuration.</td></tr>`);
-        return; // No users to display
+        return;
     }
 
     const q = ($('#q').val() || '').toLowerCase();
@@ -120,11 +119,12 @@ async function loadUsers(){
 
     const adminBaseSet = new Set(
       data
-        .filter(u => u.isPrivileged && (u.samAccountName || '').toLowerCase().endsWith('-a'))
+        .filter(u => u.isPrivileged)
         .map(u => (u.samAccountName || '').toLowerCase().replace(/-a$/i, ''))
     );
 
     const filteredData = data
+      .filter(u => !u.isPrivileged) // Exclude privileged accounts from the main list
       .filter(u => !domFilter || u.domain === domFilter)
       .filter(u => (u.samAccountName || '').toLowerCase().includes(q) || (u.displayName || '').toLowerCase().includes(q));
 
@@ -136,21 +136,16 @@ async function loadUsers(){
     
     filteredData.forEach(u => {
         const status = (u.enabled ? 'Enabled' : 'Disabled') + (u.isLocked ? ' - Locked' : '');
-        const isPriv = !!u.isPrivileged;
         const base = (u.samAccountName || '').toLowerCase();
-        const hasAdmin = !isPriv && adminBaseSet.has(base);
-        const adminBadgeHtml = isPriv
-          ? '<span class="badge bg-secondary">—</span>'
-          : (hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>');
+        const hasAdmin = adminBaseSet.has(base);
+        const adminBadgeHtml = hasAdmin ? '<span class="badge bg-success">✓</span>' : '<span class="badge bg-danger">✗</span>';
 
         const actions = $('<div class="icon-actions d-flex align-items-center justify-content-center"></div>');
         
-        if (!isPriv) {
-            actions.append(
-              $('<button class="btn-icon text-info me-2" aria-label="Edit" data-bs-toggle="tooltip" title="Edit User"><i class="bi bi-pencil-square"></i></button>')
-                .click(() => openEditModal(u.domain, u.samAccountName))
-            );
-        }
+        actions.append(
+          $('<button class="btn-icon text-info me-2" aria-label="Edit" data-bs-toggle="tooltip" title="Edit User"><i class="bi bi-pencil-square"></i></button>')
+            .click(() => openEditModal(u.domain, u.samAccountName))
+        );
 
         actions.append(
           $('<button class="btn-icon text-secondary me-2" aria-label="Unlock" data-bs-toggle="tooltip" title="Unlock"><i class="bi bi-unlock"></i></button>')
@@ -172,7 +167,7 @@ async function loadUsers(){
               loadUsers();
             })
         );
-        if (!isPriv && hasAdmin) {
+        if (hasAdmin) {
           const adminSam = `${u.samAccountName}-a`;
           actions.append(
             $(`<button class="btn-icon text-danger" aria-label="Reset Admin Password" data-bs-toggle="tooltip" title="Reset Admin Password (${adminSam})"><i class="bi bi-shield-lock"></i></button>`)
@@ -223,7 +218,7 @@ function getCreateFormData() {
     samAccountName: $('#c_sam').val(),
     createPrivileged: $('#c_priv').is(':checked'),
     selectedPrivilegedGroupCn: $('#c_priv_group').val() || null,
-    makeSelectedPrimary: $('#c_priv_primary').is(':checked'),
+    makeSelectedPrimary: $('#c_priv_primary_single').is(':checked'),
     selectedGeneralAccessGroups: $('#c_general_groups').val() || [],
     selectedPrivilegeAccessGroups: $('#c_priv_groups').val() || []
   };
@@ -386,4 +381,3 @@ $('#c_priv').on('change', function() {
   
   await loadUsers();
 })();
-
