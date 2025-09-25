@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace ADWebManager.Models
@@ -17,12 +18,18 @@ namespace ADWebManager.Models
 
     public class CreateUserRequest
     {
+        [Required]
         public string Domain { get; set; } = string.Empty;
+        [Required]
+        [StringLength(20, MinimumLength = 3)]
         public string SamAccountName { get; set; } = string.Empty;
+        [Required]
         public string FirstName { get; set; } = string.Empty;
+        [Required]
         public string LastName { get; set; } = string.Empty;
         public DateOnly? Birthdate { get; set; }
         public DateOnly? ExpirationDate { get; set; }
+        [Phone]
         public string MobileNumber { get; set; } = string.Empty;
         public bool CreatePrivileged { get; set; }
         public string? SelectedPrivilegedGroupCn { get; set; }
@@ -33,12 +40,17 @@ namespace ADWebManager.Models
     
     public class UpdateUserRequest
     {
+        [Required]
         public string Domain { get; set; } = string.Empty;
+        [Required]
         public string SamAccountName { get; set; } = string.Empty;
+        [Required]
         public string FirstName { get; set; } = string.Empty;
+        [Required]
         public string LastName { get; set; } = string.Empty;
         public DateOnly? Birthdate { get; set; }
         public DateOnly? ExpirationDate { get; set; }
+        [Phone]
         public string MobileNumber { get; set; } = string.Empty;
     }
 
@@ -63,10 +75,16 @@ namespace ADWebManager.Models
 
     public class SelfServiceResetRequest
     {
+        [Required]
         public string Domain { get; set; } = string.Empty;
+        [Required]
         public string SamAccountName { get; set; } = string.Empty;
+        [Required]
         public string Birthdate { get; set; } = string.Empty;
+        [Required]
+        [StringLength(4, MinimumLength = 4)]
         public string MobileLast4 { get; set; } = string.Empty;
+        [Required]
         public string NewPassword { get; set; } = string.Empty;
     }
 
@@ -86,4 +104,3 @@ namespace ADWebManager.Models
         public string? Error { get; set; }
     }
 }
-

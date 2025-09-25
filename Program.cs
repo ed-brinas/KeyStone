@@ -10,13 +10,22 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using ADWebManager.Models;
 using ADWebManager.Services;
+
+// Centralized definition of authorization policy names
+public static class AuthorizationPolicies
+{
+    public const string AdminPortalAccess = "AdminPortalAccess";
+    public const string PrivilegedAdmin = "PrivilegedAdmin";
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,8 +62,6 @@ builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNe
 
 builder.Services.AddAuthorization(o =>
 {
-    // Temporarily build service provider to read settings for authorization setup.
-    // This is done once at startup.
     var serviceProvider = builder.Services.BuildServiceProvider();
     var adSettings = serviceProvider.GetRequiredService<IOptions<AdSettings>>().Value;
     
@@ -62,12 +69,10 @@ builder.Services.AddAuthorization(o =>
     var highPrivilegeGroups = adSettings.AccessControl?.HighPrivilegeGroups ?? new List<string>();
     var allAdminGroups = generalGroups.Concat(highPrivilegeGroups).Distinct().ToArray();
 
-    // Policy for general access to the admin portal
-    o.AddPolicy("AdminPortalAccess", policy => 
+    o.AddPolicy(AuthorizationPolicies.AdminPortalAccess, policy => 
         policy.RequireRole(allAdminGroups));
         
-    // Policy for actions requiring high privileges (e.g., creating admin accounts)
-    o.AddPolicy("PrivilegedAdmin", policy => 
+    o.AddPolicy(AuthorizationPolicies.PrivilegedAdmin, policy => 
         policy.RequireRole(highPrivilegeGroups));
 });
 
@@ -75,6 +80,30 @@ builder.Services.AddAuthorization(o =>
 builder.Services.AddRouting();
 
 var app = builder.Build();
+
+// ---------- Global Exception Handler ----------
+app.UseExceptionHandler(appError =>
+{
+    appError.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+
+        var contextFeature = context.Features.Get<IExceptionHandlerFeature>();
+        if(contextFeature != null)
+        { 
+            var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogError($"Something went wrong: {contextFeature.Error}");
+
+            await context.Response.WriteAsJsonAsync(new 
+            {
+                ok = false,
+                message = "An unexpected error occurred. Please try again later."
+            });
+        }
+    });
+});
+
 
 // ---------- Static & Auth ----------
 app.UseDefaultFiles();
@@ -96,16 +125,15 @@ app.MapPost("/api/admin/logout", (HttpContext ctx, SecurityService sec) =>
 {
     sec.DestroySession(ctx);
     return Results.Ok(new { ok = true, message = "Logged out" });
-}).RequireAuthorization("AdminPortalAccess");
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 // --- Permissions check endpoint ---
 app.MapGet("/api/session/permissions", (HttpContext ctx, IOptions<AdSettings> cfg) =>
 {
-    // Correctly check if the user is in any of the high privilege groups
     var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
     var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
     return Results.Ok(new { canCreatePrivileged });
-}).RequireAuthorization("AdminPortalAccess");
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 
 // --- CSRF guard for unsafe admin calls ---
@@ -170,174 +198,130 @@ app.MapGet("/api/config/optional-groups", (HttpContext ctx, IOptions<AdSettings>
 }).AllowAnonymous();
 
 // -------- Admin (Windows auth) --------
-app.MapGet("/api/admin/health", (HealthService health, AuditLogService audit, HttpContext ctx) =>
+app.MapGet("/api/admin/health", async (HealthService health, AuditLogService audit, HttpContext ctx) =>
 {
-    try { return Results.Ok(new { ok = true, report = health.GetReport() }); }
+    try 
+    { 
+        var report = await health.GetReportAsync();
+        return Results.Ok(new { ok = true, report }); 
+    }
     catch (Exception ex)
     {
         audit.Write(Caller(ctx), "health", "-", false, ex.Message, RemoteIp(ctx));
         return Results.BadRequest(new { ok = false, message = ex.Message });
     }
-}).RequireAuthorization("AdminPortalAccess");
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogService audit, IOptions<AdSettings> cfg) =>
 {
-    try
-    {
-        var ad = cfg.Value ?? new AdSettings();
-        var queryDomain = ctx.Request.Query["domain"].ToString();
-        var results = new System.Collections.Generic.List<UserRow>();
-        var domains = string.IsNullOrWhiteSpace(queryDomain) ? AllDomains(ad) : new[] { queryDomain };
+    var ad = cfg.Value ?? new AdSettings();
+    var queryDomain = ctx.Request.Query["domain"].ToString();
+    var results = new System.Collections.Generic.List<UserRow>();
+    var domains = string.IsNullOrWhiteSpace(queryDomain) ? AllDomains(ad) : new[] { queryDomain };
 
-        foreach (var d in domains) results.AddRange(adSvc.ListUsers(d));
-        return Results.Ok(results);
-    }
-    catch (Exception ex)
-    {
-        audit.Write(Caller(ctx), "users", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminPortalAccess");
+    foreach (var d in domains) results.AddRange(adSvc.ListUsers(d));
+    return Results.Ok(results);
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapGet("/api/admin/user-details", (string domain, string sam, AdService adSvc, AuditLogService audit, HttpContext ctx) =>
 {
-    try
-    {
-        var user = adSvc.GetUserDetails(domain, sam);
-        return Results.Ok(user);
-    }
-    catch (Exception ex)
-    {
-        audit.Write(Caller(ctx), "user-details", $"{domain}\\{sam}", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminPortalAccess");
+    var user = adSvc.GetUserDetails(domain, sam);
+    return Results.Ok(user);
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapPost("/api/selfservice/reset", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
-    try
-    {
-        var req = await ReadJson<SelfServiceResetRequest>(ctx);
-        var (ok, problems) = pw.CheckStrengthForUser(req.SamAccountName, req.NewPassword);
-        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
+    var req = await ReadJson<SelfServiceResetRequest>(ctx);
+    var (ok, problems) = pw.CheckStrengthForUser(req.SamAccountName, req.NewPassword);
+    if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
 
-        await ad.SelfServiceResetPasswordAsync(req);
-        audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        audit.Write("(selfservice)", "reset", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
+    await ad.SelfServiceResetPasswordAsync(req);
+    audit.Write("(selfservice)", "reset", $"{req.Domain}\\{req.SamAccountName}", true, "Self-service reset", RemoteIp(ctx));
+    return Results.Ok(new { ok = true });
 }).AllowAnonymous();
 
 app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, AuditLogService audit, IOptions<AdSettings> cfg) =>
 {
     var caller = Caller(ctx);
-    try
-    {
-        var req = await ReadJson<CreateUserRequest>(ctx);
-        
-        // Refactored permission check for clarity and correctness
-        var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
-        var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
+    var req = await ReadJson<CreateUserRequest>(ctx);
+    
+    var highPrivilegeGroups = cfg.Value?.AccessControl?.HighPrivilegeGroups ?? new List<string>();
+    var canCreatePrivileged = highPrivilegeGroups.Any(group => ctx.User.IsInRole(group));
 
-        if (req.CreatePrivileged && !canCreatePrivileged)
-        {
-            audit.Write(caller, "create", req.SamAccountName, false, "Forbidden: insufficient privilege to create admin account.", RemoteIp(ctx));
-            return Results.Forbid();
-        }
-
-        var result = ad.CreateUser(req, caller);
-        var admin = new
-        {
-            created = req.CreatePrivileged,
-            sam = req.CreatePrivileged ? result.SamAccountName + "-a" : null,
-            password = req.CreatePrivileged ? result.AdminInitialPassword : null
-        };
-        audit.Write(caller, "create", $"{result.Domain}\\{result.SamAccountName}", true, $"priv={req.CreatePrivileged}", RemoteIp(ctx));
-        return Results.Ok(new { ok = true, result, admin });
-    }
-    catch (Exception ex)
+    if (req.CreatePrivileged && !canCreatePrivileged)
     {
-        audit.Write(caller, "create", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
+        audit.Write(caller, "create", req.SamAccountName, false, "Forbidden: insufficient privilege to create admin account.", RemoteIp(ctx));
+        return Results.Forbid();
     }
-}).RequireAuthorization("AdminPortalAccess");
+
+    var result = ad.CreateUser(req, caller);
+    
+    // Do not return the initial password in the response.
+    // The user should go through a password reset flow.
+    result.InitialPassword = string.Empty; 
+    result.AdminInitialPassword = null;
+
+    var admin = new
+    {
+        created = req.CreatePrivileged,
+        sam = req.CreatePrivileged ? result.SamAccountName + "-a" : null,
+    };
+    audit.Write(caller, "create", $"{result.Domain}\\{result.SamAccountName}", true, $"priv={req.CreatePrivileged}", RemoteIp(ctx));
+    return Results.Ok(new { ok = true, result, admin });
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapPost("/api/admin/create-user/export-pdf", async (HttpContext ctx, PdfService pdf, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
-    try
-    {
-        var r = await ReadJson<CreateUserResult>(ctx);
-        var bytes = pdf.CreateSummary(r);
-        return Results.File(bytes, "application/pdf", $"acct-{r.SamAccountName}.pdf");
-    }
-    catch (Exception ex)
-    {
-        audit.Write(caller, "export-pdf", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminPortalAccess");
+    var r = await ReadJson<CreateUserResult>(ctx);
+    var bytes = pdf.CreateSummary(r);
+    return Results.File(bytes, "application/pdf", $"acct-{r.SamAccountName}.pdf");
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapPost("/api/admin/update-user", async (HttpContext ctx, AdService ad, AuditLogService audit) =>
 {
     var caller = Caller(ctx);
-    try
-    {
-        var req = await ReadJson<UpdateUserRequest>(ctx);
-        ad.UpdateUser(req, caller);
-        audit.Write(caller, "update", $"{req.Domain}\\{req.SamAccountName}", true, null, RemoteIp(ctx));
-        return Results.Ok(new { ok = true });
-    }
-    catch (Exception ex)
-    {
-        audit.Write(caller, "update", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminPortalAccess");
+    var req = await ReadJson<UpdateUserRequest>(ctx);
+    ad.UpdateUser(req, caller);
+    audit.Write(caller, "update", $"{req.Domain}\\{req.SamAccountName}", true, null, RemoteIp(ctx));
+    return Results.Ok(new { ok = true });
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, AuditLogService audit, PasswordService pw) =>
 {
     var caller = Caller(ctx);
-    try
+    using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
+    var root = doc.RootElement;
+
+    if (!root.TryGetProperty("domain", out var domainProp) || domainProp.GetString() is not { } domain ||
+        !root.TryGetProperty("samAccountName", out var samProp) || samProp.GetString() is not { } sam)
     {
-        using var doc = await JsonDocument.ParseAsync(ctx.Request.Body);
-        var root = doc.RootElement;
-
-        var domain = root.GetProperty("domain").GetString()!;
-        var sam = root.GetProperty("samAccountName").GetString()!;
-        var unlock = root.TryGetProperty("unlock", out var u) && u.GetBoolean();
-
-        string? newPassword = null;
-        if (root.TryGetProperty("newPassword", out var np) && np.ValueKind == JsonValueKind.String)
-            newPassword = np.GetString();
-
-        if (!string.IsNullOrWhiteSpace(newPassword))
-        {
-            var (ok, problems) = pw.CheckStrengthForUser(sam, newPassword!);
-            if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
-
-            ad.SetPassword(domain, sam, newPassword!, unlock);
-            audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=true; unlock=" + unlock, RemoteIp(ctx));
-            return Results.Ok(new { ok = true, generated = false });
-        }
-        else
-        {
-            var generated = ad.ResetPassword(domain, sam, unlock);
-            audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=false; unlock=" + unlock, RemoteIp(ctx));
-            return Results.Ok(new { ok = true, generated = true, password = generated });
-        }
+        return Results.BadRequest(new { ok = false, message = "Missing domain or samAccountName." });
     }
-    catch (Exception ex)
+
+    var unlock = root.TryGetProperty("unlock", out var u) && u.GetBoolean();
+
+    string? newPassword = null;
+    if (root.TryGetProperty("newPassword", out var np) && np.ValueKind == JsonValueKind.String)
+        newPassword = np.GetString();
+
+    if (!string.IsNullOrWhiteSpace(newPassword))
     {
-        audit.Write(caller, "reset-password", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
-}).RequireAuthorization("AdminPortalAccess");
+        var (ok, problems) = pw.CheckStrengthForUser(sam, newPassword!);
+        if (!ok) return Results.BadRequest(new { ok = false, message = "Password does not meet policy.", problems });
 
-app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization("AdminPortalAccess");
+        ad.SetPassword(domain, sam, newPassword!, unlock);
+        audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=true; unlock=" + unlock, RemoteIp(ctx));
+        return Results.Ok(new { ok = true, generated = false });
+    }
+    else
+    {
+        var generated = ad.ResetPassword(domain, sam, unlock);
+        audit.Write(caller, "reset-password", $"{domain}\\{sam}", true, "custom=false; unlock=" + unlock, RemoteIp(ctx));
+        return Results.Ok(new { ok = true, generated = true, password = generated });
+    }
+}).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
+
+app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.Run();

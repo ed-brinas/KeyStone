@@ -77,7 +77,6 @@ namespace ADWebManager.Services
                 var state = JsonSerializer.Deserialize<SessionState>(cookie);
                 if (state == null) return null;
 
-                // Validate session
                 var now = DateTime.UtcNow;
                 if ((now - state.Created).TotalMinutes > _options.AbsoluteTimeoutMinutes) return null;
                 if ((now - state.LastSeen).TotalMinutes > _options.IdleTimeoutMinutes) return null;
@@ -103,11 +102,13 @@ namespace ADWebManager.Services
         private static string GetFingerprint(HttpContext ctx)
         {
             var ua = ctx.Request.Headers["User-Agent"].ToString();
+            var lang = ctx.Request.Headers["Accept-Language"].ToString();
+            var encoding = ctx.Request.Headers["Accept-Encoding"].ToString();
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "?.?.?.?";
+            
             using var sha = SHA256.Create();
-            var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(ua + ip));
+            var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(ua + lang + encoding + ip));
             return Convert.ToBase64String(bytes);
         }
     }
 }
-

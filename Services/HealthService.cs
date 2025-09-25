@@ -2,6 +2,7 @@ using System;
 using System.DirectoryServices;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using ADWebManager.Models;
 using Microsoft.Extensions.Options;
 
@@ -16,43 +17,50 @@ namespace ADWebManager.Services
             _cfg = cfg.Value;
         }
 
-        public HealthReport GetReport()
+        public async Task<HealthReport> GetReportAsync()
         {
             var sw = Stopwatch.StartNew();
-            var checks = _cfg.Health.DomainControllers
-                .Select(dc => CheckDc(dc))
+            var checkTasks = _cfg.Health.DomainControllers
+                .Select(dc => CheckDcAsync(dc))
                 .ToList();
+
+            var checks = await Task.WhenAll(checkTasks);
 
             return new HealthReport
             {
                 Timestamp = DateTime.UtcNow,
                 OverallDurationMs = sw.ElapsedMilliseconds,
-                DcChecks = checks
+                DcChecks = checks.ToList()
             };
         }
 
-        private DcCheckResult CheckDc(DcTarget dc)
+        private Task<DcCheckResult> CheckDcAsync(DcTarget dc)
         {
-            var sw = Stopwatch.StartNew();
-            var result = new DcCheckResult { Domain = dc.Domain, Host = dc.Host, Status = "FAIL" };
-            try
+            return Task.Run(() =>
             {
-                using var de = new DirectoryEntry($"LDAP://{dc.Host}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
-                de.RefreshCache(new[] { "serverName" });
+                var sw = Stopwatch.StartNew();
+                var result = new DcCheckResult { Domain = dc.Domain, Host = dc.Host, Status = "FAIL" };
+                try
+                {
+                    // For more robust timeout handling, consider setting the
+                    // .Timeout property on the DirectorySearcher object.
+                    using var de = new DirectoryEntry($"LDAP://{dc.Host}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
+                    de.RefreshCache(new[] { "serverName" });
 
-                result.Status = (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyCritMs) ? "CRIT"
-                              : (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyWarnMs) ? "WARN"
-                              : "OK";
-            }
-            catch (Exception ex)
-            {
-                result.Error = ex.Message;
-            }
-            finally
-            {
-                result.DurationMs = sw.ElapsedMilliseconds;
-            }
-            return result;
+                    result.Status = (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyCritMs) ? "CRIT"
+                                  : (sw.ElapsedMilliseconds > _cfg.Health.LdapLatencyWarnMs) ? "WARN"
+                                  : "OK";
+                }
+                catch (Exception ex)
+                {
+                    result.Error = ex.Message;
+                }
+                finally
+                {
+                    result.DurationMs = sw.ElapsedMilliseconds;
+                }
+                return result;
+            });
         }
     }
 }
