@@ -54,7 +54,12 @@ namespace ADWebManager.Models
         public string MobileNumber { get; set; } = string.Empty;
     }
 
-    public class UserDetails : UpdateUserRequest { }
+    public class UserDetails : UpdateUserRequest 
+    {
+        public string DisplayName { get; set; } = string.Empty;
+        public bool Enabled { get; set; }
+        public bool IsLocked { get; set; }
+    }
 
     public class CreateUserResult
     {
