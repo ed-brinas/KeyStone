@@ -175,9 +175,19 @@ namespace ADWebManager.Services
         public IReadOnlyList<UserRow> ListUsers(string domain)
         {
             var results = new List<UserRow>();
-            if (_cfg.Provisioning?.SearchBaseOus == null) return results;
+            var searchOus = new List<string>();
 
-            foreach (var baseOuFmt in _cfg.Provisioning.SearchBaseOus)
+            if (_cfg.Provisioning?.SearchBaseOus != null)
+            {
+                searchOus.AddRange(_cfg.Provisioning.SearchBaseOus);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_cfg.Provisioning?.AdminUserOuFormat))
+            {
+                searchOus.Add(_cfg.Provisioning.AdminUserOuFormat);
+            }
+
+            foreach (var baseOuFmt in searchOus.Distinct())
             {
                 var baseOu = ExpandOu(baseOuFmt, domain);
                 using var de = new DirectoryEntry($"LDAP://{baseOu}", _cfg.Provisioning.ServiceAccountUser, _cfg.Provisioning.ServiceAccountPassword);
