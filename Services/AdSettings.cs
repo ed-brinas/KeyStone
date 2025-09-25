@@ -115,4 +115,3 @@ namespace ADWebManager.Services
         public string Host { get; set; } = string.Empty;
     }
 }
-
