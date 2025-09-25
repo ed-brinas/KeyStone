@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,13 +20,6 @@ using Microsoft.Extensions.Options;
 
 using ADWebManager.Models;
 using ADWebManager.Services;
-
-// Centralized definition of authorization policy names
-public static class AuthorizationPolicies
-{
-    public const string AdminPortalAccess = "AdminPortalAccess";
-    public const string PrivilegedAdmin = "PrivilegedAdmin";
-}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -60,10 +54,12 @@ builder.Services.AddSingleton<SecurityService>(sp =>
 
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 
+// Correctly configure Authorization by binding settings directly from IConfiguration
 builder.Services.AddAuthorization(o =>
 {
-    var serviceProvider = builder.Services.BuildServiceProvider();
-    var adSettings = serviceProvider.GetRequiredService<IOptions<AdSettings>>().Value;
+    // Bind AdSettings from configuration to access AccessControl
+    var adSettings = new AdSettings();
+    builder.Configuration.GetSection("AdSettings").Bind(adSettings);
     
     var generalGroups = adSettings.AccessControl?.GeneralAccessGroups ?? new List<string>();
     var highPrivilegeGroups = adSettings.AccessControl?.HighPrivilegeGroups ?? new List<string>();
@@ -200,16 +196,8 @@ app.MapGet("/api/config/optional-groups", (HttpContext ctx, IOptions<AdSettings>
 // -------- Admin (Windows auth) --------
 app.MapGet("/api/admin/health", async (HealthService health, AuditLogService audit, HttpContext ctx) =>
 {
-    try 
-    { 
-        var report = await health.GetReportAsync();
-        return Results.Ok(new { ok = true, report }); 
-    }
-    catch (Exception ex)
-    {
-        audit.Write(Caller(ctx), "health", "-", false, ex.Message, RemoteIp(ctx));
-        return Results.BadRequest(new { ok = false, message = ex.Message });
-    }
+    var report = await health.GetReportAsync();
+    return Results.Ok(new { ok = true, report }); 
 }).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.MapGet("/api/admin/users", (HttpContext ctx, AdService adSvc, AuditLogService audit, IOptions<AdSettings> cfg) =>
@@ -256,8 +244,6 @@ app.MapPost("/api/admin/create-user", async (HttpContext ctx, AdService ad, Audi
 
     var result = ad.CreateUser(req, caller);
     
-    // Do not return the initial password in the response.
-    // The user should go through a password reset flow.
     result.InitialPassword = string.Empty; 
     result.AdminInitialPassword = null;
 
@@ -325,3 +311,10 @@ app.MapPost("/api/admin/reset-password", async (HttpContext ctx, AdService ad, A
 app.MapGet("/api/admin/logs", (AuditLogService audit) => Results.Ok(new { entries = audit.Tail() })).RequireAuthorization(AuthorizationPolicies.AdminPortalAccess);
 
 app.Run();
+
+// Centralized definition of authorization policy names
+public static class AuthorizationPolicies
+{
+    public const string AdminPortalAccess = "AdminPortalAccess";
+    public const string PrivilegedAdmin = "PrivilegedAdmin";
+}
