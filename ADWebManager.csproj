@@ -19,5 +19,6 @@
 
     <!-- Windows Negotiate (Kerberos/NTLM) -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.8" />
+    <PackageReference Include="itext.kernel" Version="8.0.2" />
   </ItemGroup>
 </Project>
