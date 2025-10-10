@@ -35,6 +35,15 @@
         .table-actions .bi {
             font-size: 1.2rem;
         }
+
+        #resetPassword.form-control-plaintext {
+            font-family: monospace;
+            font-size: 1.1rem;
+            background-color: #e9ecef;
+            padding: 0.5rem;
+            border-radius: 0.25rem;
+        }
+
     </style>
 </head>
 <body>
@@ -46,11 +55,19 @@
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navbarCollapse">
-            {{-- This empty list pushes the following items to the right --}}
-            <ul class="navbar-nav me-auto mb-2 mb-md-0"></ul>
+            <ul class="navbar-nav me-auto mb-2 mb-md-0">
+                 <li class="nav-item">
+                    <a class="nav-link" href="{{ route('users.index') }}" title="Users">
+                        <i class="bi bi-people-fill" style="font-size: 1.5rem;"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" title="Audit Log">
+                        <i class="bi bi-journal-text" style="font-size: 1.5rem;"></i>
+                    </a>
+                </li>
+            </ul>
 
-
-            {{-- All items that should collapse are now inside this div --}}
             <form class="d-flex navbar-search-form" action="{{ route('users.index') }}" method="GET">
                 <select name="domain" class="form-select me-2" onchange="this.form.submit()">
                     @if(isset($domains))
@@ -62,29 +79,16 @@
                     @endif
                 </select>
                 <input type="search" name="search_query" class="form-control me-2" placeholder="Search users..." value="{{ $searchQuery ?? '' }}">
-                {{-- MODIFIED START - 2025-10-10 21:15 - Changed button class to match navbar color. --}}
-                <button class="btn btn-dark" type="submit" title="Search">
-                {{-- MODIFIED END - 2025-10-10 21:15 --}}
-                    <i class="bi bi-search"></i>
+                <button class="btn btn-dark" type="submit">
+                     <i class="bi bi-search"></i>
                 </button>
             </form>
 
-
-            <ul class="navbar-nav ms-md-2 mt-2 mt-md-0 d-flex flex-row align-items-center">
-                <li class="nav-item">
-                    <a class="nav-link active" aria-current="page" href="{{ route('users.index') }}" title="Users">
-                        <i class="bi bi-people-fill" style="font-size: 1.5rem;"></i>
-                    </a>
-                </li>
-                <li class="nav-item ms-2">
-                    <a class="nav-link" href="#" title="Audit Log">
-                        <i class="bi bi-card-list" style="font-size: 1.5rem;"></i>
-                    </a>
-                </li>
-                 <li class="nav-item ms-2">
-                    <a class="nav-link" href="#" title="Logout">
+            <ul class="navbar-nav ms-2">
+                 <li class="nav-item">
+                     <a href="#" class="nav-link" title="Logout">
                         <i class="bi bi-box-arrow-right" style="font-size: 1.5rem;"></i>
-                    </a>
+                     </a>
                 </li>
             </ul>
         </div>
@@ -92,28 +96,15 @@
 </nav>
 
 <main class="container py-4">
+
     <!-- Flash Messages -->
     @if(session('success'))
-        <div class="alert alert-success">{{ session('success') }}</div>
-    @endif
-    @if(session('error'))
-        <div class="alert alert-danger">{{ session('error') }}</div>
+        <div class="alert alert-success">{!! session('success') !!}</div>
     @endif
      @if(session('info'))
         <div class="alert alert-info">{{ session('info') }}</div>
     @endif
-    @if(isset($error))
-         <div class="alert alert-danger">{{ $error }}</div>
-    @endif
-    @if ($errors->any())
-        <div class="alert alert-danger">
-            <ul class="mb-0">
-                @foreach ($errors->all() as $error)
-                    <li>{{ $error }}</li>
-                @endforeach
-            </ul>
-        </div>
-    @endif
+
 
 
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -147,7 +138,9 @@
                 <tbody>
                     @forelse($users ?? [] as $user)
                         <tr>
-                            <td>{{ $user->getFirstAttribute('cn') }}</td>
+
+                            <td>{{ $user->getFirstAttribute('displayname') }}</td>
+
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
                             <td>{{ $selectedDomain ?? 'N/A' }}</td>
                             <td>
@@ -176,9 +169,15 @@
                             </td>
                             <td class="text-center table-actions">
                                 <div class="d-flex justify-content-center align-items-center">
-                                    <a href="{{ route('users.edit', ['guid' => $user->getConvertedGuid(), 'domain' => $selectedDomain]) }}" class="p-2" title="Edit User">
-                                        <i class="bi bi-pencil-square"></i>
-                                    </a>
+                                    <button type="button" class="btn btn-link p-2" title="Edit User" data-bs-toggle="modal" data-bs-target="#editUserModal-{{ $user->getConvertedGuid() }}">
+                                         <i class="bi bi-pencil-fill"></i>
+                                    </button>
+
+
+                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal" data-bs-target="#resetPasswordConfirmModal-{{ $user->getConvertedGuid() }}">
+                                        <i class="bi bi-key-fill text-secondary"></i>
+                                    </button>
+
 
                                     @if ($user->getFirstAttribute('lockouttime') > 0)
                                         <form action="{{ route('users.unlock', ['guid' => $user->getConvertedGuid()]) }}" method="POST" class="d-inline">
@@ -225,12 +224,120 @@
 
 @include('users.create')
 
-<!-- MODIFIED START - 2025-10-10 19:55 - Added local Bootstrap JS to enable dynamic components like the navbar. -->
-<script src="{{ asset('js/bootstrap.min.js') }}"></script>
-<!-- MODIFIED END - 2025-10-10 19:55 -->
+@if(isset($users))
+    @foreach($users as $user)
+        @include('users.edit', ['user' => $user, 'domain' => $selectedDomain, 'optionalGroups' => $optionalGroups])
 
+        <!-- Reset Password Confirmation Modal -->
+        <div class="modal fade" id="resetPasswordConfirmModal-{{ $user->getConvertedGuid() }}" tabindex="-1" aria-labelledby="resetPasswordConfirmModalLabel-{{ $user->getConvertedGuid() }}" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="resetPasswordConfirmModalLabel-{{ $user->getConvertedGuid() }}">Confirm Password Reset</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        Are you sure you want to reset the password for <strong>{{ $user->getFirstAttribute('displayname') }}</strong>?
+                        <br><br>
+                        This will also unlock the account if it is currently locked.
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <form action="{{ route('users.resetPassword', ['guid' => $user->getConvertedGuid()]) }}" method="POST">
+                            @csrf
+                            <input type="hidden" name="domain" value="{{ $selectedDomain }}">
+                            <button type="submit" class="btn btn-danger">Reset Password</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    @endforeach
+@endif
+
+
+{{-- MODIFIED START - 2025-10-10 21:53 - Added data-* attributes to pass session data to JavaScript reliably. --}}
+<div class="modal fade" id="passwordResetSuccessModal" tabindex="-1" aria-labelledby="passwordResetSuccessModalLabel" aria-hidden="true"
+    @if(session('reset_success'))
+        data-show-modal="true"
+        data-username="{{ session('reset_username') }}"
+        data-password="{{ session('reset_password') }}"
+    @endif
+>
+{{-- MODIFIED END - 2025-10-10 21:53 --}}
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="passwordResetSuccessModalLabel">Password Reset Successfully</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>The password for user <strong id="resetUsername"></strong> has been reset.</p>
+                <div class="mb-3">
+                    <label for="resetPassword" class="form-label">New Temporary Password:</label>
+                    <div class="input-group">
+                        <input type="text" id="resetPassword" class="form-control-plaintext" readonly>
+                        <button class="btn btn-outline-secondary" type="button" id="copyPasswordBtn">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <p class="text-muted small">The user will be required to change this password at next logon.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+<script src="{{ asset('js/bootstrap.min.js') }}"></script>
+
+
+{{-- MODIFIED START - 2025-10-10 21:53 - Updated script to read data-* attributes for improved reliability. --}}
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('DOMContentLoaded', function() {
+        // --- Logic for re-opening modals on validation failure ---
+        const errorModalId = @json(session('open_modal'));
+        if (errorModalId) {
+            const errorModalElement = document.querySelector(errorModalId);
+            if (errorModalElement) {
+                const errorModal = new bootstrap.Modal(errorModalElement);
+                errorModal.show();
+            }
+        }
+
+        // --- Logic for showing the password reset success modal ---
+        const successModalElement = document.getElementById('passwordResetSuccessModal');
+        if (successModalElement && successModalElement.dataset.showModal === 'true') {
+            document.getElementById('resetUsername').textContent = successModalElement.dataset.username;
+            document.getElementById('resetPassword').value = successModalElement.dataset.password;
+
+            const successModal = new bootstrap.Modal(successModalElement);
+            successModal.show();
+        }
+
+        // --- Logic for the 'Copy Password' button ---
+        const copyBtn = document.getElementById('copyPasswordBtn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', function() {
+                const passwordInput = document.getElementById('resetPassword');
+                passwordInput.select();
+                document.execCommand('copy');
+
+                const originalText = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
+
+                setTimeout(() => {
+                    this.innerHTML = originalText;
+                }, 2000);
+            });
+        }
+
+        // --- Logic for auto-generating display name in create form ---
         const firstNameInput = document.getElementById('first_name');
         const lastNameInput = document.getElementById('last_name');
         const displayNameInput = document.getElementById('display_name');
@@ -257,7 +364,8 @@
         }
     });
 </script>
+{{-- MODIFIED END - 2025-10-10 21:53 --}}
+
 
 </body>
 </html>
-

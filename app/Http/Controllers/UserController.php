@@ -4,15 +4,16 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use LdapRecord\Models\ActiveDirectory\User;
+use LdapRecord\Models\ActiveDirectory\Group;
 use LdapRecord\Container;
-use LdapRecord\LdapRecordException;
-// MODIFIED START - 2025-10-10 19:32 - Imported the Connection class to fix TypeError.
 use LdapRecord\Connection;
-// MODIFIED END - 2025-10-10 19:32
+use LdapRecord\LdapRecordException;
+use Illuminate\Support\Facades\Validator;
+use LdapRecord\Models\Attributes\Password;
+use Carbon\Carbon;
 
 class UserController extends Controller
 {
-    // MODIFIED START - 2025-10-10 19:34 - Fixed TypeError for array_merge.
     /**
      * Display a listing of the resource.
      *
@@ -50,7 +51,6 @@ class UserController extends Controller
                     $ouQuery = clone $query;
                     $results = $ouQuery->in($fullOu)->get();
                     if ($results) {
-                       // Convert the LdapRecord Collection to an array before merging.
                        $usersInOus = array_merge($usersInOus, $results->all());
                     }
                 }
@@ -64,11 +64,11 @@ class UserController extends Controller
             $error = "No domains configured. Please check your keystone.php configuration file.";
         }
 
-        return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error'));
+        $provisioningOus = config('keystone.provisioning.provisioningOus', []);
+        $optionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
+        return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error', 'provisioningOus', 'optionalGroups'));
     }
-    // MODIFIED END - 2025-10-10 19:34
 
-    // MODIFIED START - 2025-10-10 19:33 - Fixed "Call to undefined method LdapRecord\ConnectionManager::setDefault()" error.
     /**
      * Dynamically sets the default LDAP connection.
      *
@@ -86,46 +86,187 @@ class UserController extends Controller
         }
 
         $connection = new Connection($config);
+
         Container::addConnection($connection, $domain);
 
-        // Corrected method call from setDefault to setDefaultConnection.
         Container::setDefaultConnection($domain);
     }
-    // MODIFIED END - 2025-10-10 19:33
 
     /**
-     * Show the form for creating a new resource.
+     * Show the form for creating a a new resource.
      */
     public function create()
     {
-        // MODIFIED START - 2025-10-10 19:27 - Pass domains for modal dropdown.
         $domains = config('keystone.adSettings.domains', []);
         $selectedDomain = $domains[0] ?? null;
-        return view('users.index', compact('domains', 'selectedDomain'));
-        // MODIFIED END - 2025-10-10 19:27
+        $optionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
+        return view('users.index', compact('domains', 'selectedDomain', 'optionalGroups'));
     }
 
     /**
      * Store a newly created resource in storage.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function store(Request $request)
     {
-        // Placeholder for Phase 3.
-        return redirect()->route('users.index')->with('info', 'User creation logic is not yet implemented.');
+        $validator = Validator::make($request->all(), [
+            'first_name' => 'required|string|max:50',
+            'last_name' => 'required|string|max:50',
+            'date_of_birth' => 'required|date',
+            'mobile_number' => 'required|string|max:20',
+            'domain' => 'required|string',
+            'account_expires' => 'nullable|date|after:today',
+            'groups' => 'nullable|array'
+        ]);
+
+
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#userCreateModal');
+        }
+
+
+        try {
+            $this->setLdapConnection($request->domain);
+
+            $firstName = $request->first_name;
+            $lastName = $request->last_name;
+            $displayName = "$firstName $lastName";
+            $samAccountName = strtolower(substr($firstName, 0, 1) . '.' . $lastName);
+
+            if (User::where('samaccountname', '=', $samAccountName)->exists()) {
+
+                return redirect()->back()->with('error', 'A user with that username already exists.')->withInput()->with('open_modal', '#userCreateModal');
+
+            }
+
+            $user = new User();
+
+            $ouStandardUser = config('keystone.provisioning.ouStandardUser');
+            $domainComponents = 'dc=' . str_replace('.', ',dc=', $request->domain);
+            $fullOu = str_replace('{domain-components}', $domainComponents, $ouStandardUser);
+
+            $user->setDn("cn=$displayName," . $fullOu);
+
+            $user->givenname = $firstName;
+            $user->sn = $lastName;
+            $user->cn = $displayName;
+            $user->displayname = $displayName;
+            $user->samaccountname = $samAccountName;
+            $user->userprincipalname = $samAccountName . '@' . $request->domain;
+
+            $password = $this->generatePassword();
+            $user->unicodepwd = Password::encode($password);
+
+            $user->mobile = $request->mobile_number;
+            $user->extensionattribute1 = $request->date_of_birth;
+
+            if ($request->filled('account_expires')) {
+                $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
+            } else {
+                $user->accountexpires = 0; // Never expires
+            }
+
+            $user->useraccountcontrol = 512;
+
+            $user->save();
+
+            if ($request->has('groups')) {
+                foreach ($request->groups as $groupName) {
+                    $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
+                    if ($group) {
+                        $user->groups()->attach($group);
+                    }
+                }
+            }
+
+            $user->pwdlastset = -1;
+            $user->save();
+
+            $successMessage = "User created successfully. Temporary Password: <strong>$password</strong>";
+            return redirect()->route('users.index')->with('success', $successMessage);
+
+        } catch (\Exception $e) {
+
+            return redirect()->back()->with('error', 'Failed to create user: ' . $e->getMessage())->withInput()->with('open_modal', '#userCreateModal');
+
+        }
     }
 
-    // MODIFIED START - 2025-10-10 19:27 - Added placeholder edit method.
     /**
-     * Show the form for editing the specified resource.
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  string  $guid
+     * @return \Illuminate\Http\RedirectResponse
      */
-    public function edit($guid, Request $request)
+    public function update(Request $request, $guid)
     {
-        // Placeholder for Phase 3.
-        return redirect()->route('users.index')->with('info', 'User editing is not yet implemented.');
-    }
-    // MODIFIED END - 2025-10-10 19:27
+        $validator = Validator::make($request->all(), [
+            'first_name' => 'required|string|max:50',
+            'last_name' => 'required|string|max:50',
+            'date_of_birth' => 'required|date',
+            'mobile_number' => 'required|string|max:20',
+            'domain' => 'required|string',
+            'account_expires' => 'nullable|date|after:today',
+            'password' => 'nullable|string|min:8|confirmed',
+            'groups' => 'nullable|array'
+        ]);
 
-    // MODIFIED START - 2025-10-10 19:27 - Implemented toggleStatus method.
+
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#editUserModal-' . $guid);
+        }
+
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $user = User::findOrFail($guid);
+
+            $user->givenname = $request->first_name;
+            $user->sn = $request->last_name;
+            $user->displayname = $request->first_name . ' ' . $request->last_name;
+
+            $user->mobile = $request->mobile_number;
+            $user->extensionattribute1 = $request->date_of_birth;
+
+            if ($request->filled('account_expires')) {
+                $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
+            } else {
+                $user->accountexpires = 0; // Never expires
+            }
+
+            if ($request->filled('password')) {
+                $user->unicodepwd = Password::encode($request->password);
+            }
+
+            $user->save();
+
+            $domainComponents = 'dc=' . str_replace('.', ',dc=', $request->domain);
+            $userGroups = $user->groups()->get()->pluck('cn')->flatten()->toArray();
+            $submittedGroups = $request->input('groups', []);
+
+            $groupsToAdd = array_diff($submittedGroups, $userGroups);
+            foreach ($groupsToAdd as $groupName) {
+                $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
+                if($group) $user->groups()->attach($group);
+            }
+
+            $groupsToRemove = array_diff($userGroups, $submittedGroups);
+             foreach ($groupsToRemove as $groupName) {
+                $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
+                if($group) $user->groups()->detach($group);
+            }
+
+            return redirect()->route('users.index')->with('success', 'User updated successfully.');
+        } catch (\Exception $e) {
+
+            return redirect()->back()->with('error', 'Failed to update user: ' . $e->getMessage())->with('open_modal', '#editUserModal-' . $guid);
+
+        }
+    }
+
     /**
      * Update the account status (enable/disable).
      *
@@ -152,9 +293,7 @@ class UserController extends Controller
             return redirect()->back()->with('error', 'Failed to update user status: ' . $e->getMessage());
         }
     }
-    // MODIFIED END - 2025-10-10 19:27
 
-    // MODIFIED START - 2025-10-10 19:27 - Updated unlock method to use GUID.
     /**
      * Unlock the specified user account.
      *
@@ -176,6 +315,44 @@ class UserController extends Controller
             return redirect()->back()->with('error', 'Failed to unlock user: ' . $e->getMessage());
         }
     }
-    // MODIFIED END - 2025-10-10 19:27
+
+    // MODIFIED START - 2025-10-10 21:47 - Added method to handle password reset logic.
+    /**
+     * Reset the password for a user.
+     *
+     * @param string $guid
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function resetPassword($guid, Request $request)
+    {
+        try {
+            $this->setLdapConnection($request->input('domain'));
+            $user = User::findOrFail($guid);
+
+            $newPassword = $this->generatePassword();
+
+            // Set the new password
+            $user->unicodepwd = Password::encode($newPassword);
+
+            // Unlock the account if it's locked
+            $user->lockouttime = 0;
+
+            // Force user to change password at next logon
+            $user->pwdlastset = 0;
+
+            $user->save();
+
+            // Flash session with success flag, username and new password
+            return redirect()->route('users.index')
+                ->with('reset_success', true)
+                ->with('reset_username', $user->getFirstAttribute('samaccountname'))
+                ->with('reset_password', $newPassword);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Failed to reset password: ' . $e->getMessage());
+        }
+    }
+    // MODIFIED END - 2025-10-10 21:47
 }
 

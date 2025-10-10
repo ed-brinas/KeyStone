@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\UserController;
 
-// MODIFIED START - 2025-10-10 19:41 - Replaced generic resource route with specific named routes to match the view.
+
 // Redirect the root URL to the users index page.
 Route::get('/', function () {
     return redirect()->route('users.index');
@@ -11,16 +11,13 @@ Route::get('/', function () {
 
 // User management routes
 Route::get('/users', [UserController::class, 'index'])->name('users.index');
-Route::get('/users/create', [UserController::class, 'create'])->name('users.create');
 Route::post('/users', [UserController::class, 'store'])->name('users.store');
+Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.update');
 
-// Route for showing the edit form (Phase 3 Stub)
-Route::get('/users/{guid}/edit', [UserController::class, 'edit'])->name('users.edit');
-
-// Route for unlocking a user account
-Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
-
-// Route for toggling user account status (enable/disable)
+// User account actions
 Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
-// MODIFIED END - 2025-10-10 19:41
+Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
+// MODIFIED START - 2025-10-10 21:47 - Added route for the new password reset functionality.
+Route::post('/users/{guid}/reset-password', [UserController::class, 'resetPassword'])->name('users.resetPassword');
+// MODIFIED END - 2025-10-10 21:47
 
