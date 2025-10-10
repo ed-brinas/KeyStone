@@ -12,7 +12,7 @@ use LdapRecord\Connection;
 
 class UserController extends Controller
 {
-    // MODIFIED START - 2025-10-10 19:27 - Refactored index method to support multi-domain search and filtering.
+    // MODIFIED START - 2025-10-10 19:34 - Fixed TypeError for array_merge.
     /**
      * Display a listing of the resource.
      *
@@ -50,7 +50,8 @@ class UserController extends Controller
                     $ouQuery = clone $query;
                     $results = $ouQuery->in($fullOu)->get();
                     if ($results) {
-                       $usersInOus = array_merge($usersInOus, $results);
+                       // Convert the LdapRecord Collection to an array before merging.
+                       $usersInOus = array_merge($usersInOus, $results->all());
                     }
                 }
 
@@ -65,7 +66,7 @@ class UserController extends Controller
 
         return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error'));
     }
-    // MODIFIED END - 2025-10-10 19:27
+    // MODIFIED END - 2025-10-10 19:34
 
     // MODIFIED START - 2025-10-10 19:33 - Fixed "Call to undefined method LdapRecord\ConnectionManager::setDefault()" error.
     /**
