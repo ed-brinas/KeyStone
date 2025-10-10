@@ -6,6 +6,9 @@ use Illuminate\Http\Request;
 use LdapRecord\Models\ActiveDirectory\User;
 use LdapRecord\Container;
 use LdapRecord\LdapRecordException;
+// MODIFIED START - 2025-10-10 19:32 - Imported the Connection class to fix TypeError.
+use LdapRecord\Connection;
+// MODIFIED END - 2025-10-10 19:32
 
 class UserController extends Controller
 {
@@ -34,23 +37,23 @@ class UserController extends Controller
                 if (!empty($searchQuery)) {
                     $query->where(function ($q) use ($searchQuery) {
                         $q->where('cn', 'contains', $searchQuery)
-                          ->orWhere('samaccountname', 'contains', $searchQuery)
+                          ->orWhere('samaccountname', 'contains', 'like', '%' . $searchQuery . '%')
                           ->orWhere('mail', 'contains', $searchQuery);
                     });
                 }
-
+                
                 $usersInOus = [];
                 foreach ($searchOus as $ou) {
                     $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
                     $fullOu = str_replace('{domain-components}', $domainComponents, $ou);
-
+                    
                     $ouQuery = clone $query;
                     $results = $ouQuery->in($fullOu)->get();
                     if ($results) {
                        $usersInOus = array_merge($usersInOus, $results);
                     }
                 }
-
+                
                 $users = $usersInOus;
 
             } catch (LdapRecordException $e) {
@@ -64,7 +67,7 @@ class UserController extends Controller
     }
     // MODIFIED END - 2025-10-10 19:27
 
-    // MODIFIED START - 2025-10-10 19:31 - Fixed "Call to undefined method LdapRecord\ConnectionManager::remove()" error.
+    // MODIFIED START - 2025-10-10 19:32 - Fixed TypeError by creating a new Connection object.
     /**
      * Dynamically sets the default LDAP connection.
      *
@@ -73,25 +76,24 @@ class UserController extends Controller
      */
     private function setLdapConnection(string $domain): void
     {
-        // Get the base configuration from config/ldap.php
         $config = config('ldap.connections.default');
-
-        // Dynamically set the base_dn for the selected domain
         $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
-
-        // Dynamically set the hosts from the keystone config for the selected domain
         $domainAdServers = config("keystone.adSettings.domain_controllers.{$domain}");
+
         if (!empty($domainAdServers)) {
             $config['hosts'] = $domainAdServers;
         }
 
-        // Add the dynamically configured connection with the domain name as its unique key.
-        Container::addConnection($config, $domain);
+        // Create a new Connection instance with the dynamic configuration.
+        $connection = new Connection($config);
 
-        // Set this new connection as the default for all subsequent LDAP operations.
+        // Add the new connection object to the container.
+        Container::addConnection($connection, $domain);
+        
+        // Set this new connection as the default.
         Container::setDefault($domain);
     }
-    // MODIFIED END - 2025-10-10 19:31
+    // MODIFIED END - 2025-10-10 19:32
 
     /**
      * Show the form for creating a new resource.
@@ -113,7 +115,7 @@ class UserController extends Controller
         // Placeholder for Phase 3.
         return redirect()->route('users.index')->with('info', 'User creation logic is not yet implemented.');
     }
-
+    
     // MODIFIED START - 2025-10-10 19:27 - Added placeholder edit method.
     /**
      * Show the form for editing the specified resource.
@@ -167,10 +169,10 @@ class UserController extends Controller
         try {
             $this->setLdapConnection($request->input('domain'));
             $user = User::findOrFail($guid);
-
+            
             $user->lockouttime = 0;
             $user->save();
-
+            
             return redirect()->back()->with('success', 'User unlocked successfully.');
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Failed to unlock user: ' . $e->getMessage());
