@@ -64,7 +64,7 @@ class UserController extends Controller
     }
     // MODIFIED END - 2025-10-10 19:27
 
-    // MODIFIED START - 2025-10-10 19:27 - Added helper to dynamically set LDAP connection for the selected domain.
+    // MODIFIED START - 2025-10-10 19:31 - Fixed "Call to undefined method LdapRecord\ConnectionManager::remove()" error.
     /**
      * Dynamically sets the default LDAP connection.
      *
@@ -73,14 +73,25 @@ class UserController extends Controller
      */
     private function setLdapConnection(string $domain): void
     {
+        // Get the base configuration from config/ldap.php
         $config = config('ldap.connections.default');
+
+        // Dynamically set the base_dn for the selected domain
         $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
 
-        Container::remove('default');
-        Container::addConnection($config, 'default');
-        Container::setDefault('default');
+        // Dynamically set the hosts from the keystone config for the selected domain
+        $domainAdServers = config("keystone.adSettings.domain_controllers.{$domain}");
+        if (!empty($domainAdServers)) {
+            $config['hosts'] = $domainAdServers;
+        }
+
+        // Add the dynamically configured connection with the domain name as its unique key.
+        Container::addConnection($config, $domain);
+
+        // Set this new connection as the default for all subsequent LDAP operations.
+        Container::setDefault($domain);
     }
-    // MODIFIED END - 2025-10-10 19:27
+    // MODIFIED END - 2025-10-10 19:31
 
     /**
      * Show the form for creating a new resource.
