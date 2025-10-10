@@ -125,12 +125,22 @@
                                     <span class="text-muted">No</span>
                                 @endif
                             </td>
-                            <td>{{ $user->getAccountExpiry() ? $user->getAccountExpiry()->format('Y-m-d') : 'Never' }}</td>
+                            <td>
+                                {{-- Correctly check and format the accountexpires attribute --}}
+                                @if($user->accountexpires && $user->accountexpires->timestamp > 0 && $user->accountexpires->year < 9999)
+                                    {{ $user->accountexpires->format('Y-m-d') }}
+                                @else
+                                    Never
+                                @endif
+                            </td>
                             <td>
                                 @if ($user->isDisabled())
                                     <span class="badge bg-danger">Disabled</span>
                                 @else
                                     <span class="badge bg-success">Enabled</span>
+                                @endif
+                                @if ($user->isLocked())
+                                    <span class="badge bg-warning text-dark">Locked</span>
                                 @endif
                             </td>
                             <td class="text-center table-actions">
@@ -144,12 +154,12 @@
                                             @csrf
                                             <input type="hidden" name="domain" value="{{ $selectedDomain }}">
                                             <button type="submit" class="btn btn-link" title="Unlock Account">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" a="b" c="d" e="f" g="h"><path d="M7 7H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"></path><path d="M9 9V7a3 3 0 0 1 3-3v0a3 3 0 0 1 3 3v2"></path><rect x="13" y="13" width="8" height="5" rx="1"></rect><path d="M17 13v-2"></path></svg>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" a="b" c="d" e="f" g="h"><path d="M7 7H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"></path><path d="M9 9V7a3 3 0 0 1 3-3v0a3 3 0 0 1 3 3v2"></path><rect x="13" y="13" width="8" height="5" rx="1"></rect><path d="M17 13v-2"></path></svg>
                                             </button>
                                         </form>
                                     @else
                                          <a href="#" class="p-2 text-black-50" title="Account OK" style="cursor: not-allowed;">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" a="b" c="d" e="f" g="h"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" a="b" c="d" e="f" g="h"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
                                         </a>
                                     @endif
 
@@ -158,11 +168,11 @@
                                         <input type="hidden" name="domain" value="{{ $selectedDomain }}">
                                         @if ($user->isDisabled())
                                             <button type="submit" class="btn btn-link" title="Enable Account">
-                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" a="b" c="d" e="f" g="h"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path><path d="M2 8c0-2.2.7-4.3 2-6"></path><path d="M22 8a10 10 0 0 0-2-6"></path></svg>
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" a="b" c="d" e="f" g="h"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path><path d="M2 8c0-2.2.7-4.3 2-6"></path><path d="M22 8a10 10 0 0 0-2-6"></path></svg>
                                             </button>
                                         @else
                                             <button type="submit" class="btn btn-link" title="Disable Account">
-                                               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" a="b" c="d" e="f" g="h"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                                               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" a="b" c="d" e="f" g="h"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                                             </button>
                                         @endif
                                     </form>
