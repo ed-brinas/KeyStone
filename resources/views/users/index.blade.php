@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>KeyStone - AD User Management</title>
 
-    <!-- MODIFIED START - 2025-10-10 19:55 - Replaced Vite with local Bootstrap CSS and added Bootstrap Icons CDN. -->
     <link href="{{ asset('css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ asset('css/bootstrap-icons/bootstrap-icons.min.css') }}" rel="stylesheet">
-    <!-- MODIFIED END - 2025-10-10 19:55 -->
 
     <style>
         body {
@@ -30,12 +28,11 @@
             width: 250px;
         }
         .dropdown-toggle::after {
-            display: none; /* Hide default dropdown arrow */
+            display: none;
         }
         .table-actions .bi {
             font-size: 1.2rem;
         }
-
         #resetPassword.form-control-plaintext {
             font-family: monospace;
             font-size: 1.1rem;
@@ -43,7 +40,6 @@
             padding: 0.5rem;
             border-radius: 0.25rem;
         }
-
     </style>
 </head>
 <body>
@@ -97,15 +93,12 @@
 
 <main class="container py-4">
 
-    <!-- Flash Messages -->
     @if(session('success'))
         <div class="alert alert-success">{!! session('success') !!}</div>
     @endif
      @if(session('info'))
         <div class="alert alert-info">{{ session('info') }}</div>
     @endif
-
-
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h2">User Directory</h1>
@@ -138,19 +131,15 @@
                 <tbody>
                     @forelse($users ?? [] as $user)
                         <tr>
-
                             <td>{{ $user->getFirstAttribute('displayname') }}</td>
-
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
                             <td>{{ $selectedDomain ?? 'N/A' }}</td>
                             <td>
-                                {{-- MODIFIED START - 2025-10-10 23:25 - Replaced invalid str_ends_with() with substr() for broad PHP compatibility. --}}
                                 @if (substr($user->getFirstAttribute('samaccountname'), -2) === '-a')
                                     <span class="badge bg-dark">Yes</span>
                                 @else
                                     <span class="text-muted">No</span>
                                 @endif
-                                {{-- MODIFIED END - 2025-10-10 23:25 --}}
                             </td>
                             <td>
                                 @if($user->accountexpires instanceof \Carbon\Carbon)
@@ -174,13 +163,9 @@
                                     <button type="button" class="btn btn-link p-2" title="Edit User" data-bs-toggle="modal" data-bs-target="#editUserModal-{{ $user->getConvertedGuid() }}">
                                          <i class="bi bi-pencil-fill"></i>
                                     </button>
-
-
-                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal" data-bs-target="#resetPasswordConfirmModal-{{ $user->getConvertedGuid() }}">
+                                    <button type="button" class="btn btn-link p-2 reset-password-btn" title="Reset Password" data-guid="{{ $user->getConvertedGuid() }}" data-username="{{ $user->getFirstAttribute('samaccountname') }}">
                                         <i class="bi bi-key-fill text-secondary"></i>
                                     </button>
-
-
                                     @if ($user->getFirstAttribute('lockouttime') > 0)
                                         <form action="{{ route('users.unlock', ['guid' => $user->getConvertedGuid()]) }}" method="POST" class="d-inline">
                                             @csrf
@@ -194,7 +179,6 @@
                                             <i class="bi bi-shield-check text-success"></i>
                                         </a>
                                     @endif
-
                                     <form action="{{ route('users.toggle-status', ['guid' => $user->getConvertedGuid()]) }}" method="POST" class="d-inline">
                                         @csrf
                                         <input type="hidden" name="domain" value="{{ $selectedDomain }}">
@@ -229,81 +213,57 @@
 @if(isset($users))
     @foreach($users as $user)
         @include('users.edit', ['user' => $user, 'domain' => $selectedDomain, 'optionalGroups' => $optionalGroups])
-
-        <!-- Reset Password Confirmation Modal -->
-        <div class="modal fade" id="resetPasswordConfirmModal-{{ $user->getConvertedGuid() }}" tabindex="-1" aria-labelledby="resetPasswordConfirmModalLabel-{{ $user->getConvertedGuid() }}" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="resetPasswordConfirmModalLabel-{{ $user->getConvertedGuid() }}">Confirm Password Reset</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        Are you sure you want to reset the password for <strong>{{ $user->getFirstAttribute('displayname') }}</strong>?
-                        <br><br>
-                        This will also unlock the account if it is currently locked.
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <form action="{{ route('users.resetPassword', ['guid' => $user->getConvertedGuid()]) }}" method="POST">
-                            @csrf
-                            <input type="hidden" name="domain" value="{{ $selectedDomain }}">
-                            <button type="submit" class="btn btn-danger">Reset Password</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-
     @endforeach
 @endif
 
-
-{{-- MODIFIED START - 2025-10-10 23:16 - Updated timestamp to finalize session data handling for password reset success modal. --}}
-<div class="modal fade" id="passwordResetSuccessModal" tabindex="-1" aria-labelledby="passwordResetSuccessModalLabel" aria-hidden="true"
-    @if(session('reset_success'))
-        data-show-modal="true"
-        data-username="{{ session('reset_username') }}"
-        data-password="{{ session('reset_password') }}"
-    @endif
->
-{{-- MODIFIED END - 2025-10-10 23:16 --}}
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="passwordResetSuccessModalLabel">Password Reset Successfully</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>The password for user <strong id="resetUsername"></strong> has been reset.</p>
-                <div class="mb-3">
-                    <label for="resetPassword" class="form-label">New Temporary Password:</label>
-                    <div class="input-group">
-                        <input type="text" id="resetPassword" class="form-control-plaintext" readonly>
-                        <button class="btn btn-outline-secondary" type="button" id="copyPasswordBtn">
-                            <i class="bi bi-clipboard"></i> Copy
-                        </button>
-                    </div>
-                </div>
-                <p class="text-muted small">The user will be required to change this password at next logon.</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
-            </div>
-        </div>
+<!-- MODIFIED START - Add new global Reset Password confirmation modal [2025-10-11 16:25] -->
+<div class="modal fade" id="confirmGlobalResetModal" tabindex="-1" aria-labelledby="confirmGlobalResetModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title" id="confirmGlobalResetModalLabel">Confirm Password Reset</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        Are you sure you want to reset this user's password? This will also unlock their account if it is locked.
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" id="confirmGlobalResetBtn" class="btn btn-danger">Yes, Reset</button>
+      </div>
     </div>
+  </div>
 </div>
+<!-- MODIFIED END -->
 
+<!-- MODIFIED START - Add success modal showing new password and copy button [2025-10-11 16:25] -->
+<div class="modal fade" id="resetResultModal" tabindex="-1" aria-labelledby="resetResultModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title" id="resetResultModalLabel">Password Reset Successful</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p><strong>Username:</strong> <span id="resetUsername"></span></p>
+        <p><strong>New Password:</strong>
+          <span id="resetPasswordText" class="text-monospace"></span>
+          <button class="btn btn-outline-secondary btn-sm" id="copyPasswordBtn">
+            <i class="bi bi-clipboard"></i> Copy
+          </button>
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-success" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- MODIFIED END -->
 
-<!-- MODIFIED START - 2025-10-10 23:18 - Replaced local asset call for Bootstrap JS with CDN to fix modal issues. -->
 <script src="{{ asset('js/bootstrap.min.js') }}"></script>
-<!-- MODIFIED END - 2025-10-10 23:18 -->
-
-
-{{-- MODIFIED START - 2025-10-10 23:25 - Updated timestamp to reflect final JS logic adjustments. --}}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // --- Logic for re-opening modals on validation failure ---
         const errorModalId = @json(session('open_modal'));
         if (errorModalId) {
             const errorModalElement = document.querySelector(errorModalId);
@@ -313,47 +273,70 @@
             }
         }
 
-        // --- Logic for showing the password reset success modal ---
         const successModalElement = document.getElementById('passwordResetSuccessModal');
         if (successModalElement && successModalElement.dataset.showModal === 'true') {
             document.getElementById('resetUsername').textContent = successModalElement.dataset.username;
             document.getElementById('resetPassword').value = successModalElement.dataset.password;
-
             const successModal = new bootstrap.Modal(successModalElement);
             successModal.show();
         }
 
-        // --- Logic for the 'Copy Password' button ---
         const copyBtn = document.getElementById('copyPasswordBtn');
         if (copyBtn) {
             copyBtn.addEventListener('click', function() {
-                const passwordInput = document.getElementById('resetPassword');
-                // Use document.execCommand('copy') for better compatibility in iframe environments
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    navigator.clipboard.writeText(passwordInput.value).then(() => {
-                        console.log('Password copied to clipboard (modern API)');
-                    }).catch(err => {
-                        console.error('Could not copy text (modern API fallback): ', err);
-                        // Fallback using execCommand (deprecated but often necessary in iframes)
-                        passwordInput.select();
-                        document.execCommand('copy');
-                    });
-                } else {
-                    passwordInput.select();
-                    document.execCommand('copy');
-                }
-
-
-                const originalText = this.innerHTML;
-                this.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
-
-                setTimeout(() => {
-                    this.innerHTML = originalText;
-                }, 2000);
+                const passwordText = document.getElementById('resetPasswordText').textContent;
+                navigator.clipboard.writeText(passwordText).then(() => {
+                    this.innerHTML = '<i class="bi bi-check-lg"></i> Copied';
+                    setTimeout(() => this.innerHTML = '<i class="bi bi-clipboard"></i> Copy', 2000);
+                });
             });
         }
 
-        // --- Logic for auto-generating display name in create form ---
+        // MODIFIED START - Add Reset Password handling JS [2025-10-11 16:25]
+        let selectedUserGuid = null;
+        let selectedUsername = null;
+
+        document.querySelectorAll('.reset-password-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                selectedUserGuid = this.dataset.guid;
+                selectedUsername = this.dataset.username;
+                const modal = new bootstrap.Modal(document.getElementById('confirmGlobalResetModal'));
+                modal.show();
+            });
+        });
+
+        document.getElementById('confirmGlobalResetBtn').addEventListener('click', function () {
+            if (!selectedUserGuid) return;
+
+            fetch(`/users/reset-password/${selectedUserGuid}`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const confirmModal = bootstrap.Modal.getInstance(document.getElementById('confirmGlobalResetModal'));
+                confirmModal.hide();
+
+                if (data.success) {
+                    document.getElementById('resetUsername').textContent = data.username;
+                    document.getElementById('resetPasswordText').textContent = data.new_password;
+
+                    const resultModal = new bootstrap.Modal(document.getElementById('resetResultModal'));
+                    resultModal.show();
+                } else {
+                    alert('Password reset failed.');
+                }
+            })
+            .catch(err => {
+                alert('An error occurred during password reset.');
+                console.error(err);
+            });
+        });
+        // MODIFIED END
+
         const firstNameInput = document.getElementById('first_name');
         const lastNameInput = document.getElementById('last_name');
         const displayNameInput = document.getElementById('display_name');
@@ -380,8 +363,6 @@
         }
     });
 </script>
-{{-- MODIFIED END - 2025-10-10 23:25 --}}
-
 
 </body>
 </html>

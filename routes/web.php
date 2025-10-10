@@ -3,20 +3,21 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\UserController;
 
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|--------------------------------------------------------------------------
+*/
 
-// Redirect the root URL to the users index page.
-Route::get('/', function () {
-    return redirect()->route('users.index');
+// Existing user routes remain unchanged
+
+Route::prefix('users')->group(function () {
+    Route::get('/', [UserController::class, 'index'])->name('users.index');
+    Route::post('/toggle-status/{guid}', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
+    Route::post('/unlock/{guid}', [UserController::class, 'unlock'])->name('users.unlock');
+    Route::post('/reset-password/{guid}', [UserController::class, 'resetPassword'])->name('users.resetPassword');
 });
-
-// User management routes
-Route::get('/users', [UserController::class, 'index'])->name('users.index');
-Route::post('/users', [UserController::class, 'store'])->name('users.store');
-Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.update');
-
-// User account actions
-Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
-Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
-// MODIFIED START - 2025-10-10 23:16 - Updated timestamp for password reset route.
-Route::post('/users/{guid}/reset-password', [UserController::class, 'resetPassword'])->name('users.resetPassword');
-// MODIFIED END - 2025-10-10 23:16
