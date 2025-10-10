@@ -1,3 +1,4 @@
+{{-- MODIFIED START - 2025-10-10 19:27 - Replaced entire file with the new starting point content and added logic for AD timestamp conversion. --}}
 <!doctype html>
 <html lang="en">
 <head>
@@ -48,7 +49,6 @@
 
             <form class="d-flex navbar-search-form" action="{{ route('users.index') }}" method="GET">
                 <select name="domain" class="form-select me-2">
-                    {{-- MODIFIED START - 2025-10-10 19:09 - Ensure $domains exists before looping --}}
                     @if(isset($domains))
                         @foreach($domains as $domain)
                             <option value="{{ $domain }}" @if(isset($selectedDomain) && $domain == $selectedDomain) selected @endif>
@@ -56,7 +56,6 @@
                             </option>
                         @endforeach
                     @endif
-                    {{-- MODIFIED END - 2025-10-10 19:09 --}}
                 </select>
                 <input type="search" name="search_query" class="form-control me-2" placeholder="Search users..." value="{{ $searchQuery ?? '' }}">
                 <button class="btn btn-primary" type="submit">Search</button>
@@ -93,7 +92,6 @@
     @if(isset($error))
          <div class="alert alert-danger">{{ $error }}</div>
     @endif
-    {{-- MODIFIED START - 2025-10-10 19:09 - Added validation error display --}}
     @if ($errors->any())
         <div class="alert alert-danger">
             <ul class="mb-0">
@@ -103,21 +101,18 @@
             </ul>
         </div>
     @endif
-    {{-- MODIFIED END - 2025-10-10 19:09 --}}
 
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h2">User Directory</h1>
-        {{-- MODIFIED START - 2025-10-10 19:09 - Changed link to a button that triggers the modal --}}
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userCreateModal">
             Create New User
         </button>
-        {{-- MODIFIED END - 2025-10-10 19:09 --}}
     </div>
 
     <div class="card">
         <div class="card-header">
-             @if(isset($searchQuery) && $searchQuery)
+             @if(isset($searchQuery) && !empty($searchQuery))
                 Showing results for "<strong>{{ $searchQuery }}</strong>" in {{ $selectedDomain ?? '' }}
             @else
                 All users in {{ $selectedDomain ?? '' }}
@@ -137,9 +132,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {{-- MODIFIED START - 2025-10-10 19:09 - Check if $users is set and not empty --}}
                     @forelse($users ?? [] as $user)
-                    {{-- MODIFIED END - 2025-10-10 19:09 --}}
                         <tr>
                             <td>{{ $user->getFirstAttribute('cn') }}</td>
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
@@ -152,11 +145,16 @@
                                 @endif
                             </td>
                             <td>
-                                @if($user->accountexpires instanceof \Carbon\Carbon)
-                                    {{ $user->accountexpires->format('Y-m-d') }}
-                                @else
-                                    Never
-                                @endif
+                                @php
+                                    $expires = $user->getFirstAttribute('accountexpires');
+                                    if ($expires === '0' || $expires === null || strlen($expires) < 10) {
+                                        echo 'Never';
+                                    } else {
+                                        // AD timestamp is in 100-nanosecond intervals since Jan 1, 1601. Convert to Unix timestamp.
+                                        $unixTimestamp = ($expires / 10000000) - 11644473600;
+                                        echo \Carbon\Carbon::createFromTimestamp($unixTimestamp)->format('Y-m-d');
+                                    }
+                                @endphp
                             </td>
                             <td>
                                 @if ($user->isDisabled())
@@ -164,7 +162,7 @@
                                 @else
                                     <span class="badge bg-success">Enabled</span>
                                 @endif
-                                @if ($user->getFirstAttribute('lockouttime') > 0)
+                                @if ($user->isLocked())
                                     <span class="badge bg-warning text-dark">Locked</span>
                                 @endif
                             </td>
@@ -174,7 +172,7 @@
                                         <i class="bi bi-pencil-square"></i>
                                     </a>
 
-                                    @if ($user->getFirstAttribute('lockouttime') > 0)
+                                    @if ($user->isLocked())
                                         <form action="{{ route('users.unlock', ['guid' => $user->getObjectGuid()]) }}" method="POST" class="d-inline">
                                             @csrf
                                             <input type="hidden" name="domain" value="{{ $selectedDomain }}">
@@ -217,22 +215,15 @@
     </div>
 </main>
 
-{{-- MODIFIED START - 2025-10-10 19:09 - Include the create user modal partial --}}
 @include('users.create')
-{{-- MODIFIED END - 2025-10-10 19:09 --}}
 
-{{-- MODIFIED START - 2025-10-10 19:09 - Added script for auto-generating display name --}}
 <script>
-    // This script ensures that modals and other JS-dependent Bootstrap components will work.
-    // It is triggered after the DOM is fully loaded.
     document.addEventListener('DOMContentLoaded', function () {
-        // Auto-generate display name in the create user form.
         const firstNameInput = document.getElementById('first_name');
         const lastNameInput = document.getElementById('last_name');
         const displayNameInput = document.getElementById('display_name');
 
         function updateDisplayName() {
-            // Guard against the elements not being present on the page.
             if (!firstNameInput || !lastNameInput || !displayNameInput) {
                 return;
             }
@@ -240,7 +231,6 @@
             const firstName = firstNameInput.value.trim();
             const lastName = lastNameInput.value.trim();
 
-            // Helper function to convert a string to "Sentence case"
             const toSentenceCase = (str) => {
                 if (!str) return '';
                 return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
@@ -255,8 +245,7 @@
         }
     });
 </script>
-{{-- MODIFIED END - 2025-10-10 19:09 --}}
-
+{{-- MODIFIED END - 2025-10-10 19:27 --}}
 </body>
 </html>
 

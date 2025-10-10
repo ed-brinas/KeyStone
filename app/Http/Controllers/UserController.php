@@ -2,110 +2,169 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use LdapRecord\Models\ActiveDirectory\User;
 use LdapRecord\Container;
-
+use LdapRecord\LdapRecordException;
 
 class UserController extends Controller
 {
-    public function index()
+    // MODIFIED START - 2025-10-10 19:27 - Refactored index method to support multi-domain search and filtering.
+    /**
+     * Display a listing of the resource.
+     *
+     * @param Request $request
+     * @return \Illuminate\View\View
+     */
+    public function index(Request $request)
     {
+        $domains = config('keystone.adSettings.domains', []);
+        $selectedDomain = $request->input('domain', $domains[0] ?? null);
+        $searchQuery = $request->input('search_query', '');
         $users = [];
-        $connection = Container::getConnection('default');
-        // MODIFIED START - 2025-10-10 19:23
-        // Fixed bug by changing config key from 'keystone.search_ous' to 'keystone.provisioning.searchBaseOus'.
-        $searchOus = config('keystone.provisioning.searchBaseOus');
-        // MODIFIED END - 2025-10-10 19:23
+        $error = null;
 
-        foreach ($searchOus as $ou) {
-            $ouUsers = User::in($ou)->get();
-            $users = array_merge($users, $ouUsers);
+        if ($selectedDomain) {
+            try {
+                $this->setLdapConnection($selectedDomain);
+
+                $searchOus = config('keystone.provisioning.searchBaseOus', []);
+                $query = User::query();
+
+                if (!empty($searchQuery)) {
+                    $query->where(function ($q) use ($searchQuery) {
+                        $q->where('cn', 'contains', $searchQuery)
+                          ->orWhere('samaccountname', 'contains', $searchQuery)
+                          ->orWhere('mail', 'contains', $searchQuery);
+                    });
+                }
+
+                $usersInOus = [];
+                foreach ($searchOus as $ou) {
+                    $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
+                    $fullOu = str_replace('{domain-components}', $domainComponents, $ou);
+
+                    $ouQuery = clone $query;
+                    $results = $ouQuery->in($fullOu)->get();
+                    if ($results) {
+                       $usersInOus = array_merge($usersInOus, $results);
+                    }
+                }
+
+                $users = $usersInOus;
+
+            } catch (LdapRecordException $e) {
+                $error = "Could not connect or search in LDAP directory for domain '{$selectedDomain}'. Please check the configuration. Error: " . $e->getMessage();
+            }
+        } else {
+            $error = "No domains configured. Please check your keystone.php configuration file.";
         }
 
-        return view('users.index', ['users' => $users]);
+        return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error'));
     }
+    // MODIFIED END - 2025-10-10 19:27
 
+    // MODIFIED START - 2025-10-10 19:27 - Added helper to dynamically set LDAP connection for the selected domain.
+    /**
+     * Dynamically sets the default LDAP connection.
+     *
+     * @param string $domain
+     * @return void
+     */
+    private function setLdapConnection(string $domain): void
+    {
+        $config = config('ldap.connections.default');
+        $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
+
+        Container::remove('default');
+        Container::addConnection($config, 'default');
+        Container::setDefault('default');
+    }
+    // MODIFIED END - 2025-10-10 19:27
+
+    /**
+     * Show the form for creating a new resource.
+     */
     public function create()
     {
-        // Logic to show the create user form
-        return view('users.create');
+        // MODIFIED START - 2025-10-10 19:27 - Pass domains for modal dropdown.
+        $domains = config('keystone.adSettings.domains', []);
+        $selectedDomain = $domains[0] ?? null;
+        return view('users.index', compact('domains', 'selectedDomain'));
+        // MODIFIED END - 2025-10-10 19:27
     }
 
+    /**
+     * Store a newly created resource in storage.
+     */
     public function store(Request $request)
     {
-        $validatedData = $request->validate([
-            'samaccountname' => 'required',
-            'cn' => 'required',
-            'givenname' => 'required',
-            'sn' => 'required',
-            'displayname' => 'required',
-            'description' => 'nullable',
-            'userprincipalname' => 'required|email',
-            'password' => 'required|min:8',
-        ]);
+        // Placeholder for Phase 3.
+        return redirect()->route('users.index')->with('info', 'User creation logic is not yet implemented.');
+    }
 
+    // MODIFIED START - 2025-10-10 19:27 - Added placeholder edit method.
+    /**
+     * Show the form for editing the specified resource.
+     */
+    public function edit($guid, Request $request)
+    {
+        // Placeholder for Phase 3.
+        return redirect()->route('users.index')->with('info', 'User editing is not yet implemented.');
+    }
+    // MODIFIED END - 2025-10-10 19:27
+
+    // MODIFIED START - 2025-10-10 19:27 - Implemented toggleStatus method.
+    /**
+     * Update the account status (enable/disable).
+     *
+     * @param string $guid
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function toggleStatus($guid, Request $request)
+    {
         try {
-            $user = new User();
-            $user->samaccountname = $validatedData['samaccountname'];
-            $user->cn = $validatedData['cn'];
-            $user->givenname = $validatedData['givenname'];
-            $user->sn = $validatedData['sn'];
-            $user->displayname = $validatedData['displayname'];
-            $user->description = $validatedData['description'];
-            $user->userprincipalname = $validatedData['userprincipalname'];
-            $user->unicodePwd = $validatedData['password'];
-            // Set other necessary attributes
-            $user->save();
+            $this->setLdapConnection($request->input('domain'));
+            $user = User::findOrFail($guid);
 
-            return redirect()->route('users.index')->with('success', 'User created successfully.');
+            if ($user->isDisabled()) {
+                $user->useraccountcontrol = 512; // Enable Account
+                $message = 'User enabled successfully.';
+            } else {
+                $user->useraccountcontrol = 514; // Disable Account
+                $message = 'User disabled successfully.';
+            }
+            $user->save();
+            return redirect()->back()->with('success', $message);
         } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Failed to create user: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to update user status: ' . $e->getMessage());
         }
     }
+    // MODIFIED END - 2025-10-10 19:27
 
-    public function enable($guid)
+    // MODIFIED START - 2025-10-10 19:27 - Updated unlock method to use GUID.
+    /**
+     * Unlock the specified user account.
+     *
+     * @param string $guid
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function unlock($guid, Request $request)
     {
-        // MODIFIED START - 2025-10-10 19:23
-        // Standardized logic to find user by GUID for consistency.
-        $user = User::findByGuid($guid);
-        if ($user) {
-            $user->userAccountControl = 512; // Normal Account
-            $user->save();
-            return redirect()->back()->with('success', 'User enabled successfully.');
-        }
-        return redirect()->back()->with('error', 'User not found.');
-        // MODIFIED END - 2025-10-10 19:23
-    }
-    
-    public function disable($guid)
-    {
-        // MODIFIED START - 2025-10-10 19:23
-        // Standardized logic to find user by GUID for consistency.
-        $user = User::findByGuid($guid);
-        if ($user) {
-            $user->userAccountControl = 514; // Account Disabled
-            $user->save();
-            return redirect()->back()->with('success', 'User disabled successfully.');
-        }
-        return redirect()->back()->with('error', 'User not found.');
-        // MODIFIED END - 2025-10-10 19:23
-    }
-    
+        try {
+            $this->setLdapConnection($request->input('domain'));
+            $user = User::findOrFail($guid);
 
-    public function unlock($guid)
-    {
-        // MODIFIED START - 2025-10-10 19:23
-        // Standardized logic to find user by GUID and updated attribute for unlocking.
-        $user = User::findByGuid($guid);
-        if ($user) {
-            $user->lockoutTime = 0;
+            $user->lockouttime = 0;
             $user->save();
+
             return redirect()->back()->with('success', 'User unlocked successfully.');
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Failed to unlock user: ' . $e->getMessage());
         }
-        return redirect()->back()->with('error', 'User not found.');
-        // MODIFIED END - 2025-10-10 19:23
     }
-    
+    // MODIFIED END - 2025-10-10 19:27
 }
+
