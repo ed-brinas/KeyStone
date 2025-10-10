@@ -7,6 +7,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "directorytree/ldaprecord-laravel": "3.4",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1"
     },
@@ -24,7 +25,8 @@
             "App\\": "app/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
-        }
+        },
+        "files": [ "app/Support/audit.php" ]
     },
     "autoload-dev": {
         "psr-4": {
