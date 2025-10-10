@@ -1,4 +1,3 @@
-<canvas>
 <?php
 
 namespace App\Http\Controllers;
