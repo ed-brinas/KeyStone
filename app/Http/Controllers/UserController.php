@@ -41,19 +41,19 @@ class UserController extends Controller
                           ->orWhere('mail', 'contains', $searchQuery);
                     });
                 }
-                
+
                 $usersInOus = [];
                 foreach ($searchOus as $ou) {
                     $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
                     $fullOu = str_replace('{domain-components}', $domainComponents, $ou);
-                    
+
                     $ouQuery = clone $query;
                     $results = $ouQuery->in($fullOu)->get();
                     if ($results) {
                        $usersInOus = array_merge($usersInOus, $results);
                     }
                 }
-                
+
                 $users = $usersInOus;
 
             } catch (LdapRecordException $e) {
@@ -67,7 +67,7 @@ class UserController extends Controller
     }
     // MODIFIED END - 2025-10-10 19:27
 
-    // MODIFIED START - 2025-10-10 19:32 - Fixed TypeError by creating a new Connection object.
+    // MODIFIED START - 2025-10-10 19:33 - Fixed "Call to undefined method LdapRecord\ConnectionManager::setDefault()" error.
     /**
      * Dynamically sets the default LDAP connection.
      *
@@ -84,16 +84,13 @@ class UserController extends Controller
             $config['hosts'] = $domainAdServers;
         }
 
-        // Create a new Connection instance with the dynamic configuration.
         $connection = new Connection($config);
-
-        // Add the new connection object to the container.
         Container::addConnection($connection, $domain);
-        
-        // Set this new connection as the default.
-        Container::setDefault($domain);
+
+        // Corrected method call from setDefault to setDefaultConnection.
+        Container::setDefaultConnection($domain);
     }
-    // MODIFIED END - 2025-10-10 19:32
+    // MODIFIED END - 2025-10-10 19:33
 
     /**
      * Show the form for creating a new resource.
@@ -115,7 +112,7 @@ class UserController extends Controller
         // Placeholder for Phase 3.
         return redirect()->route('users.index')->with('info', 'User creation logic is not yet implemented.');
     }
-    
+
     // MODIFIED START - 2025-10-10 19:27 - Added placeholder edit method.
     /**
      * Show the form for editing the specified resource.
@@ -169,10 +166,10 @@ class UserController extends Controller
         try {
             $this->setLdapConnection($request->input('domain'));
             $user = User::findOrFail($guid);
-            
+
             $user->lockouttime = 0;
             $user->save();
-            
+
             return redirect()->back()->with('success', 'User unlocked successfully.');
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Failed to unlock user: ' . $e->getMessage());
