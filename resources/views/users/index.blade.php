@@ -126,8 +126,8 @@
                                 @endif
                             </td>
                             <td>
-                                {{-- Correctly check and format the accountexpires attribute --}}
-                                @if($user->accountexpires && $user->accountexpires->timestamp > 0 && $user->accountexpires->year < 9999)
+                                {{-- Correctly check if the attribute is a Carbon object before formatting --}}
+                                @if($user->accountexpires instanceof \Carbon\Carbon)
                                     {{ $user->accountexpires->format('Y-m-d') }}
                                 @else
                                     Never
