@@ -144,11 +144,13 @@
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
                             <td>{{ $selectedDomain ?? 'N/A' }}</td>
                             <td>
-                                @if (str_ends_with($user->getFirstAttribute('samaccountname'), '-a'))
+                                {{-- MODIFIED START - 2025-10-10 23:25 - Replaced invalid str_ends_with() with substr() for broad PHP compatibility. --}}
+                                @if (substr($user->getFirstAttribute('samaccountname'), -2) === '-a')
                                     <span class="badge bg-dark">Yes</span>
                                 @else
                                     <span class="text-muted">No</span>
                                 @endif
+                                {{-- MODIFIED END - 2025-10-10 23:25 --}}
                             </td>
                             <td>
                                 @if($user->accountexpires instanceof \Carbon\Carbon)
@@ -257,7 +259,7 @@
 @endif
 
 
-{{-- MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize session data handling for password reset success modal. --}}
+{{-- MODIFIED START - 2025-10-10 23:16 - Updated timestamp to finalize session data handling for password reset success modal. --}}
 <div class="modal fade" id="passwordResetSuccessModal" tabindex="-1" aria-labelledby="passwordResetSuccessModalLabel" aria-hidden="true"
     @if(session('reset_success'))
         data-show-modal="true"
@@ -265,7 +267,7 @@
         data-password="{{ session('reset_password') }}"
     @endif
 >
-{{-- MODIFIED END - 2025-10-10 23:08 --}}
+{{-- MODIFIED END - 2025-10-10 23:16 --}}
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -293,10 +295,12 @@
 </div>
 
 
-<script src="{{ asset('js/bootstrap.min.js') }}"></script>
+<!-- MODIFIED START - 2025-10-10 23:18 - Replaced local asset call for Bootstrap JS with CDN to fix modal issues. -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" xintegrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+<!-- MODIFIED END - 2025-10-10 23:18 -->
 
 
-{{-- MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize JavaScript logic for password reset and copy button. --}}
+{{-- MODIFIED START - 2025-10-10 23:25 - Updated timestamp to reflect final JS logic adjustments. --}}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- Logic for re-opening modals on validation failure ---
@@ -376,7 +380,7 @@
         }
     });
 </script>
-{{-- MODIFIED END - 2025-10-10 23:08 --}}
+{{-- MODIFIED END - 2025-10-10 23:25 --}}
 
 
 </body>

@@ -316,7 +316,7 @@ class UserController extends Controller
         }
     }
 
-    // MODIFIED START - 2025-10-10 23:08 - Changed visibility to protected and corrected password generation logic.
+    // MODIFIED START - 2025-10-10 23:16 - Confirmed corrected visibility and password generation logic.
     /**
      * Generates a complex password (8 characters; mixed case, numbers, special characters).
      *
@@ -347,9 +347,9 @@ class UserController extends Controller
         // Shuffle the password to ensure randomness
         return str_shuffle($password);
     }
-    // MODIFIED END - 2025-10-10 23:08
+    // MODIFIED END - 2025-10-10 23:16
 
-    // MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize password reset logic.
+    // MODIFIED START - 2025-10-10 23:16 - Updated timestamp to finalize password reset logic.
     /**
      * Reset the password for a user.
      *
@@ -386,5 +386,5 @@ class UserController extends Controller
             return redirect()->back()->with('error', 'Failed to reset password: ' . $e->getMessage());
         }
     }
-    // MODIFIED END - 2025-10-10 23:08
+    // MODIFIED END - 2025-10-10 23:16
 }

@@ -17,6 +17,6 @@ Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.upda
 // User account actions
 Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
 Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
-// MODIFIED START - 2025-10-10 23:08 - Updated timestamp for password reset route.
+// MODIFIED START - 2025-10-10 23:16 - Updated timestamp for password reset route.
 Route::post('/users/{guid}/reset-password', [UserController::class, 'resetPassword'])->name('users.resetPassword');
-// MODIFIED END - 2025-10-10 23:08
+// MODIFIED END - 2025-10-10 23:16
