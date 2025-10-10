@@ -257,7 +257,7 @@
 @endif
 
 
-{{-- MODIFIED START - 2025-10-10 21:53 - Added data-* attributes to pass session data to JavaScript reliably. --}}
+{{-- MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize session data handling for password reset success modal. --}}
 <div class="modal fade" id="passwordResetSuccessModal" tabindex="-1" aria-labelledby="passwordResetSuccessModalLabel" aria-hidden="true"
     @if(session('reset_success'))
         data-show-modal="true"
@@ -265,7 +265,7 @@
         data-password="{{ session('reset_password') }}"
     @endif
 >
-{{-- MODIFIED END - 2025-10-10 21:53 --}}
+{{-- MODIFIED END - 2025-10-10 23:08 --}}
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -293,11 +293,10 @@
 </div>
 
 
-
 <script src="{{ asset('js/bootstrap.min.js') }}"></script>
 
 
-{{-- MODIFIED START - 2025-10-10 21:53 - Updated script to read data-* attributes for improved reliability. --}}
+{{-- MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize JavaScript logic for password reset and copy button. --}}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // --- Logic for re-opening modals on validation failure ---
@@ -325,8 +324,21 @@
         if (copyBtn) {
             copyBtn.addEventListener('click', function() {
                 const passwordInput = document.getElementById('resetPassword');
-                passwordInput.select();
-                document.execCommand('copy');
+                // Use document.execCommand('copy') for better compatibility in iframe environments
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(passwordInput.value).then(() => {
+                        console.log('Password copied to clipboard (modern API)');
+                    }).catch(err => {
+                        console.error('Could not copy text (modern API fallback): ', err);
+                        // Fallback using execCommand (deprecated but often necessary in iframes)
+                        passwordInput.select();
+                        document.execCommand('copy');
+                    });
+                } else {
+                    passwordInput.select();
+                    document.execCommand('copy');
+                }
+
 
                 const originalText = this.innerHTML;
                 this.innerHTML = '<i class="bi bi-check-lg"></i> Copied!';
@@ -364,7 +376,7 @@
         }
     });
 </script>
-{{-- MODIFIED END - 2025-10-10 21:53 --}}
+{{-- MODIFIED END - 2025-10-10 23:08 --}}
 
 
 </body>

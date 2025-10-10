@@ -316,7 +316,40 @@ class UserController extends Controller
         }
     }
 
-    // MODIFIED START - 2025-10-10 21:47 - Added method to handle password reset logic.
+    // MODIFIED START - 2025-10-10 23:08 - Changed visibility to protected and corrected password generation logic.
+    /**
+     * Generates a complex password (8 characters; mixed case, numbers, special characters).
+     *
+     * @return string
+     */
+    protected function generatePassword(): string
+    {
+        $lowercase = 'abcdefghjkmnpqrstuvwxyz';
+        $uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $numbers = '23456789';
+        $specialChars = '!@#$%^&*()-_+={}[]|:;<>?';
+
+        $pool = $lowercase . $uppercase . $numbers . $specialChars;
+
+        $password = '';
+
+        // Ensure at least one of each required type
+        $password .= $lowercase[rand(0, strlen($lowercase) - 1)];
+        $password .= $uppercase[rand(0, strlen($uppercase) - 1)];
+        $password .= $numbers[rand(0, strlen($numbers) - 1)];
+        $password .= $specialChars[rand(0, strlen($specialChars) - 1)];
+
+        // Fill the rest of the 8 characters randomly (Total of 8 characters)
+        for ($i = 0; $i < 4; $i++) {
+            $password .= $pool[rand(0, strlen($pool) - 1)];
+        }
+
+        // Shuffle the password to ensure randomness
+        return str_shuffle($password);
+    }
+    // MODIFIED END - 2025-10-10 23:08
+
+    // MODIFIED START - 2025-10-10 23:08 - Updated timestamp to finalize password reset logic.
     /**
      * Reset the password for a user.
      *
@@ -353,6 +386,5 @@ class UserController extends Controller
             return redirect()->back()->with('error', 'Failed to reset password: ' . $e->getMessage());
         }
     }
-    // MODIFIED END - 2025-10-10 21:47
+    // MODIFIED END - 2025-10-10 23:08
 }
-
