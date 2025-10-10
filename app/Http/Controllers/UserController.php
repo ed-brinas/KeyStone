@@ -2,95 +2,110 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use LdapRecord\Models\ActiveDirectory\User;
 use LdapRecord\Container;
+
 
 class UserController extends Controller
 {
     public function index()
     {
-        // MODIFIED START - 2025-10-10 7:19 PM
-        // Initialize LDAP connection
-        $connection = Container::getConnection('default');
-        // MODIFIED END - 2025-10-10 7:19 PM
-
-        // MODIFIED START - 2025-10-10 7:19 PM
-        // Fetch users from all OUs defined in the configuration
         $users = [];
-        $ous = config('keystone.search_ous');
-        foreach ($ous as $ou) {
-            $users = array_merge($users, User::in($ou)->get());
-        }
-        // MODIFIED END - 2025-10-10 7:19 PM
+        $connection = Container::getConnection('default');
+        // MODIFIED START - 2025-10-10 19:23
+        // Fixed bug by changing config key from 'keystone.search_ous' to 'keystone.provisioning.searchBaseOus'.
+        $searchOus = config('keystone.provisioning.searchBaseOus');
+        // MODIFIED END - 2025-10-10 19:23
 
-        return view('users.index', compact('users'));
+        foreach ($searchOus as $ou) {
+            $ouUsers = User::in($ou)->get();
+            $users = array_merge($users, $ouUsers);
+        }
+
+        return view('users.index', ['users' => $users]);
     }
 
     public function create()
     {
+        // Logic to show the create user form
         return view('users.create');
     }
 
     public function store(Request $request)
     {
-        $request->validate([
-            'samaccountname' => 'required|string|max:255',
-            'givenname' => 'required|string|max:255',
-            'sn' => 'required|string|max:255',
-            'mail' => 'required|email|max:255',
+        $validatedData = $request->validate([
+            'samaccountname' => 'required',
+            'cn' => 'required',
+            'givenname' => 'required',
+            'sn' => 'required',
+            'displayname' => 'required',
+            'description' => 'nullable',
+            'userprincipalname' => 'required|email',
+            'password' => 'required|min:8',
         ]);
 
-        // MODIFIED START - 2025-10-10 7:19 PM
-        // Create the new user in the default OU
-        $user = new User();
-        $user->cn = $request->givenname . ' ' . $request->sn;
-        $user->samaccountname = $request->samaccountname;
-        $user->givenname = $request->givenname;
-        $user->sn = $request->sn;
-        $user->mail = $request->mail;
-        $user->save();
-        // MODIFIED END - 2025-10-10 7:19 PM
+        try {
+            $user = new User();
+            $user->samaccountname = $validatedData['samaccountname'];
+            $user->cn = $validatedData['cn'];
+            $user->givenname = $validatedData['givenname'];
+            $user->sn = $validatedData['sn'];
+            $user->displayname = $validatedData['displayname'];
+            $user->description = $validatedData['description'];
+            $user->userprincipalname = $validatedData['userprincipalname'];
+            $user->unicodePwd = $validatedData['password'];
+            // Set other necessary attributes
+            $user->save();
 
-        return redirect()->route('users.index')->with('success', 'User created successfully.');
+            return redirect()->route('users.index')->with('success', 'User created successfully.');
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Failed to create user: ' . $e->getMessage());
+        }
     }
 
-    // MODIFIED START - 2025-10-10 7:19 PM
-    public function enable(Request $request)
+    public function enable($guid)
     {
-        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
-        $user->useraccountcontrol = 512; // Enable Account
-        $user->save();
-
-        return redirect()->route('users.index')->with('success', 'User enabled successfully.');
+        // MODIFIED START - 2025-10-10 19:23
+        // Standardized logic to find user by GUID for consistency.
+        $user = User::findByGuid($guid);
+        if ($user) {
+            $user->userAccountControl = 512; // Normal Account
+            $user->save();
+            return redirect()->back()->with('success', 'User enabled successfully.');
+        }
+        return redirect()->back()->with('error', 'User not found.');
+        // MODIFIED END - 2025-10-10 19:23
     }
-
-    public function disable(Request $request)
+    
+    public function disable($guid)
     {
-        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
-        $user->useraccountcontrol = 514; // Disable Account
-        $user->save();
-
-        return redirect()->route('users.index')->with('success', 'User disabled successfully.');
+        // MODIFIED START - 2025-10-10 19:23
+        // Standardized logic to find user by GUID for consistency.
+        $user = User::findByGuid($guid);
+        if ($user) {
+            $user->userAccountControl = 514; // Account Disabled
+            $user->save();
+            return redirect()->back()->with('success', 'User disabled successfully.');
+        }
+        return redirect()->back()->with('error', 'User not found.');
+        // MODIFIED END - 2025-10-10 19:23
     }
+    
 
-    public function lock(Request $request)
+    public function unlock($guid)
     {
-        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
-        $user->lockouttime = -1; // Lock Account
-        $user->save();
-
-        return redirect()->route('users.index')->with('success', 'User locked successfully.');
+        // MODIFIED START - 2025-10-10 19:23
+        // Standardized logic to find user by GUID and updated attribute for unlocking.
+        $user = User::findByGuid($guid);
+        if ($user) {
+            $user->lockoutTime = 0;
+            $user->save();
+            return redirect()->back()->with('success', 'User unlocked successfully.');
+        }
+        return redirect()->back()->with('error', 'User not found.');
+        // MODIFIED END - 2025-10-10 19:23
     }
-
-    public function unlock(Request $request)
-    {
-        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
-        $user->lockouttime = 0; // Unlock Account
-        $user->save();
-
-        return redirect()->route('users.index')->with('success', 'User unlocked successfully.');
-    }
-    // MODIFIED END - 2025-10-10 7:19 PM
+    
 }
-

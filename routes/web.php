@@ -1,24 +1,22 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\UserController; // <-- Add this line
+use App\Http\Controllers\UserController;
 
 Route::get('/', function () {
     return view('welcome');
 });
 
-// User search and listing
+// Assuming you want the user list to be the main page for now
 Route::get('/users', [UserController::class, 'index'])->name('users.index');
-
-// MODIFIED START - 2025-10-10 19:09 - Added routes for creating and storing a new user
 Route::get('/users/create', [UserController::class, 'create'])->name('users.create');
 Route::post('/users', [UserController::class, 'store'])->name('users.store');
-// MODIFIED END - 2025-10-10 19:09
 
-// Placeholder for the user edit page (Module 2+)
-Route::get('/users/{guid}/edit', [UserController::class, 'edit'])->name('users.edit');
+// MODIFIED START - 2025-10-10 19:23
+// Removed incorrect toggle-status route and added separate routes for enable and disable actions.
+// Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
+Route::post('/users/{guid}/enable', [UserController::class, 'enable'])->name('users.enable');
+Route::post('/users/{guid}/disable', [UserController::class, 'disable'])->name('users.disable');
+// MODIFIED END - 2025-10-10 19:23
 
-// Core User Action Routes (Module 2)
-Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
 Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
-
