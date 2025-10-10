@@ -1,3 +1,4 @@
+<canvas>
 <?php
 
 namespace App\Http\Controllers;
@@ -5,242 +6,92 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use LdapRecord\Models\ActiveDirectory\User;
 use LdapRecord\Container;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Arr;
-// MODIFIED START - 2025-10-10 19:09 - Import Str for random password generation
-use Illuminate\Support\Str;
-// MODIFIED END - 2025-10-10 19:09
-
 
 class UserController extends Controller
 {
-    /**
-     * Display a list of users based on search criteria and configured OUs.
-     */
-    public function index(Request $request)
+    public function index()
     {
-        // Use camelCase keys to access the new config
-        $domains = config('keystone.adSettings.domains', array_keys(config('ldap.connections')));
-        $selectedDomain = $request->input('domain', Arr::first($domains));
-        $searchQuery = $request->input('search_query');
+        // MODIFIED START - 2025-10-10 7:19 PM
+        // Initialize LDAP connection
+        $connection = Container::getConnection('default');
+        // MODIFIED END - 2025-10-10 7:19 PM
 
-        $users = collect(); // Default to an empty collection
-
-        try {
-            // 1. Get the search OU templates from our config file.
-            $searchBaseTemplates = config('keystone.provisioning.searchBaseOus');
-
-            if (empty($searchBaseTemplates)) {
-                // If the config is missing, return an error to the user.
-                return view('users.index', [
-                    'users' => $users,
-                    'domains' => $domains,
-                    'selectedDomain' => $selectedDomain,
-                    'searchQuery' => $searchQuery,
-                    'error' => 'Configuration Error: "searchBaseOus" is not defined in config/keystone.php.'
-                ]);
-            }
-
-            // 2. Convert the selected domain (e.g., "ncc.local") into its DC components (e.g., "dc=ncc,dc=local").
-            $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
-
-            // 3. Replace the placeholder in each OU template with the actual domain components.
-            $searchBases = array_map(function ($template) use ($domainComponents) {
-                return str_replace('{domain-components}', $domainComponents, $template);
-            }, $searchBaseTemplates);
-
-            // 4. Loop through each search base, perform a query, and merge the results.
-            $allFoundUsers = collect();
-            foreach ($searchBases as $base) {
-                $query = User::on($selectedDomain)->in($base);
-
-                if ($searchQuery) {
-                    // Apply search filter if provided
-                    $query->where(function ($q) use ($searchQuery) {
-                        $q->where('samaccountname', 'contains', $searchQuery)
-                          ->orWhere('cn', 'contains', 'like', '%' . $searchQuery . '%');
-                    });
-                }
-
-                $usersInOu = $query->get();
-                $allFoundUsers = $allFoundUsers->merge($usersInOu);
-            }
-
-            // 5. Ensure results are unique (in case of overlapping OUs) and sort them by name.
-            $users = $allFoundUsers->unique('objectguid')->sortBy('cn');
-
-        } catch (\LdapRecord\LdapRecordException $e) {
-            // Enhanced error reporting to help diagnose connection issues.
-            $detailedError = $e->getDetailedError();
-            $errorMessage = "Could not connect to the LDAP server. Please check the connection details.";
-
-            if ($detailedError && $detailedError->getErrorCode() !== -1) {
-                 // Error code -1 is a generic "Can't contact LDAP server"
-                $errorMessage = "LDAP Connection Error: {$detailedError->getErrorMessage()} (Code: {$detailedError->getErrorCode()})";
-            } else {
-                $errorMessage = "Could not connect to the LDAP server. This might be a firewall, DNS, or network issue.";
-            }
-
-            Log::error("LDAP Connection Error when searching in '$selectedDomain': " . $e->getMessage());
-
-            return view('users.index', [
-                'users' => $users,
-                'domains' => $domains,
-                'selectedDomain' => $selectedDomain,
-                'searchQuery' => $searchQuery,
-                'error' => $errorMessage
-            ]);
-
-        } catch (\Exception $e) {
-             Log::error("An unexpected error occurred in UserController@index: " . $e->getMessage());
-             return view('users.index', [
-                'users' => $users,
-                'domains' => $domains,
-                'selectedDomain' => $selectedDomain,
-                'searchQuery' => $searchQuery,
-                'error' => 'An unexpected error occurred while searching for users.'
-            ]);
+        // MODIFIED START - 2025-10-10 7:19 PM
+        // Fetch users from all OUs defined in the configuration
+        $users = [];
+        $ous = config('keystone.search_ous');
+        foreach ($ous as $ou) {
+            $users = array_merge($users, User::in($ou)->get());
         }
+        // MODIFIED END - 2025-10-10 7:19 PM
 
-        return view('users.index', [
-            'users' => $users,
-            'domains' => $domains,
-            'selectedDomain' => $selectedDomain,
-            'searchQuery' => $searchQuery,
-        ]);
+        return view('users.index', compact('users'));
     }
 
-    /**
-     * MODIFIED START - 2025-10-10 19:09 - Added create method to show the creation form/modal.
-     * Show the form for creating a new resource.
-     */
     public function create()
     {
-        // This is typically used for a separate page. Since we use a modal,
-        // it's loaded via the index, but we keep this method for resourceful routing convention.
-        return redirect()->route('users.index');
+        return view('users.create');
     }
-    /**
-     * MODIFIED END - 2025-10-10 19:09
-     */
 
-    /**
-     * MODIFIED START - 2025-10-10 19:09 - Added store method to handle user creation logic.
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
         $request->validate([
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'domain' => 'required|string',
+            'samaccountname' => 'required|string|max:255',
+            'givenname' => 'required|string|max:255',
+            'sn' => 'required|string|max:255',
+            'mail' => 'required|email|max:255',
         ]);
 
-        try {
-            $selectedDomain = $request->domain;
+        // MODIFIED START - 2025-10-10 7:19 PM
+        // Create the new user in the default OU
+        $user = new User();
+        $user->cn = $request->givenname . ' ' . $request->sn;
+        $user->samaccountname = $request->samaccountname;
+        $user->givenname = $request->givenname;
+        $user->sn = $request->sn;
+        $user->mail = $request->mail;
+        $user->save();
+        // MODIFIED END - 2025-10-10 7:19 PM
 
-            // Generate username from first initial and last name
-            $username = strtolower(substr($request->first_name, 0, 1) . $request->last_name);
-
-            // Check if user exists and append a number if it does
-            $counter = 1;
-            $originalUsername = $username;
-            while (User::on($selectedDomain)->findBy('samaccountname', $username)) {
-                $username = $originalUsername . $counter++;
-            }
-
-            $user = new User();
-            $user->on($selectedDomain);
-
-            $displayName = ucwords(strtolower($request->first_name . ' ' . $request->last_name));
-            $user->cn = $displayName;
-            $user->samaccountname = $username;
-            $user->givenname = $request->first_name;
-            $user->sn = $request->last_name;
-            $user->displayname = $displayName;
-            $user->userprincipalname = $username . '@' . $selectedDomain;
-
-            // Set user in the standard OU based on config
-            $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
-            $ouTemplate = config('keystone.provisioning.ouStandardUser');
-            $ou = str_replace('{domain-components}', $domainComponents, $ouTemplate);
-            $user->setDn('cn=' . $displayName . ',' . $ou);
-
-            $user->save();
-
-            // Enable account and set a random password
-            $password = Str::random(4) . Str::upper(Str::random(2)) . rand(10, 99) . '!*';
-            $user->useraccountcontrol = 512; // Normal Account
-            $user->unicodepwd = $password;
-
-            $user->save();
-
-            return redirect()->route('users.index')->with('success', "User '{$displayName}' created successfully. Temporary Password: {$password}");
-
-        } catch (\Exception $e) {
-            Log::error("Failed to create user: " . $e->getMessage());
-            return back()->with('error', 'Error creating user: ' . $e->getMessage())->withInput();
-        }
+        return redirect()->route('users.index')->with('success', 'User created successfully.');
     }
-    /**
-     * MODIFIED END - 2025-10-10 19:09
-     */
 
-    /**
-     * Unlock a user's account.
-     */
-    public function unlock(Request $request, $guid)
+    // MODIFIED START - 2025-10-10 7:19 PM
+    public function enable(Request $request)
     {
-        $domain = $request->input('domain', config('ldap.default'));
-        try {
-            $user = User::on($domain)->findByGuid($guid);
-            if ($user) {
-                $user->unlock();
-                return back()->with('success', 'User account unlocked successfully.');
-            }
-            return back()->with('error', 'User not found.');
-        } catch (\Exception $e) {
-            Log::error("Failed to unlock user with GUID [$guid]: " . $e->getMessage());
-            return back()->with('error', 'An error occurred while trying to unlock the user.');
-        }
+        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
+        $user->useraccountcontrol = 512; // Enable Account
+        $user->save();
+
+        return redirect()->route('users.index')->with('success', 'User enabled successfully.');
     }
 
-    /**
-     * Toggle a user's account status (enabled/disabled).
-     */
-    public function toggleStatus(Request $request, $guid)
+    public function disable(Request $request)
     {
-        $domain = $request->input('domain', config('ldap.default'));
-        try {
-            $user = User::on($domain)->findByGuid($guid);
+        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
+        $user->useraccountcontrol = 514; // Disable Account
+        $user->save();
 
-            if (!$user) {
-                return back()->with('error', 'User not found.');
-            }
-
-            if ($user->isDisabled()) {
-                $user->restore();
-                $message = 'User account enabled successfully.';
-            } else {
-                $user->disable();
-                $message = 'User account disabled successfully.';
-            }
-
-            return back()->with('success', $message);
-        } catch (\Exception $e) {
-            Log::error("Failed to toggle status for user with GUID [$guid]: " . $e->getMessage());
-            return back()->with('error', 'An error occurred while changing the user account status.');
-        }
+        return redirect()->route('users.index')->with('success', 'User disabled successfully.');
     }
 
-    /**
-     * Show the form for editing a user.
-     * (This will be built in the next step)
-     */
-    public function edit($guid)
+    public function lock(Request $request)
     {
-        // We will build this functionality next.
-        return redirect()->route('users.index')->with('info', 'The "Edit User" page is under construction.');
+        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
+        $user->lockouttime = -1; // Lock Account
+        $user->save();
+
+        return redirect()->route('users.index')->with('success', 'User locked successfully.');
     }
+
+    public function unlock(Request $request)
+    {
+        $user = User::where('samaccountname', '=', $request->samaccountname)->firstOrFail();
+        $user->lockouttime = 0; // Unlock Account
+        $user->save();
+
+        return redirect()->route('users.index')->with('success', 'User unlocked successfully.');
+    }
+    // MODIFIED END - 2025-10-10 7:19 PM
 }
 
