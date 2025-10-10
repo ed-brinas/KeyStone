@@ -22,8 +22,8 @@ class UserController extends Controller
         $error = null;
 
         try {
-            // Specify the connection directly on the User model
-            $query = User::on($selectedDomain)->query();
+            // Start a new query on the User model for the selected domain
+            $query = User::on($selectedDomain);
 
             // Apply search query if it exists
             if (!empty($searchQuery)) {
