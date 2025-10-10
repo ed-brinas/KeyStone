@@ -7,6 +7,9 @@ use LdapRecord\Models\ActiveDirectory\User;
 use LdapRecord\Container;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Arr;
+// MODIFIED START - 2025-10-10 19:09 - Import Str for random password generation
+use Illuminate\Support\Str;
+// MODIFIED END - 2025-10-10 19:09
 
 
 class UserController extends Controller
@@ -106,6 +109,82 @@ class UserController extends Controller
             'searchQuery' => $searchQuery,
         ]);
     }
+
+    /**
+     * MODIFIED START - 2025-10-10 19:09 - Added create method to show the creation form/modal.
+     * Show the form for creating a new resource.
+     */
+    public function create()
+    {
+        // This is typically used for a separate page. Since we use a modal,
+        // it's loaded via the index, but we keep this method for resourceful routing convention.
+        return redirect()->route('users.index');
+    }
+    /**
+     * MODIFIED END - 2025-10-10 19:09
+     */
+
+    /**
+     * MODIFIED START - 2025-10-10 19:09 - Added store method to handle user creation logic.
+     * Store a newly created resource in storage.
+     */
+    public function store(Request $request)
+    {
+        $request->validate([
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'domain' => 'required|string',
+        ]);
+
+        try {
+            $selectedDomain = $request->domain;
+
+            // Generate username from first initial and last name
+            $username = strtolower(substr($request->first_name, 0, 1) . $request->last_name);
+
+            // Check if user exists and append a number if it does
+            $counter = 1;
+            $originalUsername = $username;
+            while (User::on($selectedDomain)->findBy('samaccountname', $username)) {
+                $username = $originalUsername . $counter++;
+            }
+
+            $user = new User();
+            $user->on($selectedDomain);
+
+            $displayName = ucwords(strtolower($request->first_name . ' ' . $request->last_name));
+            $user->cn = $displayName;
+            $user->samaccountname = $username;
+            $user->givenname = $request->first_name;
+            $user->sn = $request->last_name;
+            $user->displayname = $displayName;
+            $user->userprincipalname = $username . '@' . $selectedDomain;
+
+            // Set user in the standard OU based on config
+            $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
+            $ouTemplate = config('keystone.provisioning.ouStandardUser');
+            $ou = str_replace('{domain-components}', $domainComponents, $ouTemplate);
+            $user->setDn('cn=' . $displayName . ',' . $ou);
+
+            $user->save();
+
+            // Enable account and set a random password
+            $password = Str::random(4) . Str::upper(Str::random(2)) . rand(10, 99) . '!*';
+            $user->useraccountcontrol = 512; // Normal Account
+            $user->unicodepwd = $password;
+
+            $user->save();
+
+            return redirect()->route('users.index')->with('success', "User '{$displayName}' created successfully. Temporary Password: {$password}");
+
+        } catch (\Exception $e) {
+            Log::error("Failed to create user: " . $e->getMessage());
+            return back()->with('error', 'Error creating user: ' . $e->getMessage())->withInput();
+        }
+    }
+    /**
+     * MODIFIED END - 2025-10-10 19:09
+     */
 
     /**
      * Unlock a user's account.

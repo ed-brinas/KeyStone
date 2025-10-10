@@ -48,11 +48,15 @@
 
             <form class="d-flex navbar-search-form" action="{{ route('users.index') }}" method="GET">
                 <select name="domain" class="form-select me-2">
-                    @foreach($domains as $domain)
-                        <option value="{{ $domain }}" @if($domain == $selectedDomain) selected @endif>
-                            {{ $domain }}
-                        </option>
-                    @endforeach
+                    {{-- MODIFIED START - 2025-10-10 19:09 - Ensure $domains exists before looping --}}
+                    @if(isset($domains))
+                        @foreach($domains as $domain)
+                            <option value="{{ $domain }}" @if(isset($selectedDomain) && $domain == $selectedDomain) selected @endif>
+                                {{ $domain }}
+                            </option>
+                        @endforeach
+                    @endif
+                    {{-- MODIFIED END - 2025-10-10 19:09 --}}
                 </select>
                 <input type="search" name="search_query" class="form-control me-2" placeholder="Search users..." value="{{ $searchQuery ?? '' }}">
                 <button class="btn btn-primary" type="submit">Search</button>
@@ -89,19 +93,34 @@
     @if(isset($error))
          <div class="alert alert-danger">{{ $error }}</div>
     @endif
+    {{-- MODIFIED START - 2025-10-10 19:09 - Added validation error display --}}
+    @if ($errors->any())
+        <div class="alert alert-danger">
+            <ul class="mb-0">
+                @foreach ($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+        </div>
+    @endif
+    {{-- MODIFIED END - 2025-10-10 19:09 --}}
 
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h2">User Directory</h1>
-        <a href="#" class="btn btn-primary">Create New User</a>
+        {{-- MODIFIED START - 2025-10-10 19:09 - Changed link to a button that triggers the modal --}}
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userCreateModal">
+            Create New User
+        </button>
+        {{-- MODIFIED END - 2025-10-10 19:09 --}}
     </div>
 
     <div class="card">
         <div class="card-header">
              @if(isset($searchQuery) && $searchQuery)
-                Showing results for "<strong>{{ $searchQuery }}</strong>" in {{ $selectedDomain }}
+                Showing results for "<strong>{{ $searchQuery }}</strong>" in {{ $selectedDomain ?? '' }}
             @else
-                All users in {{ $selectedDomain }}
+                All users in {{ $selectedDomain ?? '' }}
             @endif
         </div>
         <div class="table-responsive">
@@ -118,11 +137,13 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse($users as $user)
+                    {{-- MODIFIED START - 2025-10-10 19:09 - Check if $users is set and not empty --}}
+                    @forelse($users ?? [] as $user)
+                    {{-- MODIFIED END - 2025-10-10 19:09 --}}
                         <tr>
                             <td>{{ $user->getFirstAttribute('cn') }}</td>
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
-                            <td>{{ $selectedDomain }}</td>
+                            <td>{{ $selectedDomain ?? 'N/A' }}</td>
                             <td>
                                 @if (str_ends_with($user->getFirstAttribute('samaccountname'), '-a'))
                                     <span class="badge bg-dark">Yes</span>
@@ -195,7 +216,47 @@
         </div>
     </div>
 </main>
-<!-- The old script tag is no longer needed; Vite handles JS as well -->
+
+{{-- MODIFIED START - 2025-10-10 19:09 - Include the create user modal partial --}}
+@include('users.create')
+{{-- MODIFIED END - 2025-10-10 19:09 --}}
+
+{{-- MODIFIED START - 2025-10-10 19:09 - Added script for auto-generating display name --}}
+<script>
+    // This script ensures that modals and other JS-dependent Bootstrap components will work.
+    // It is triggered after the DOM is fully loaded.
+    document.addEventListener('DOMContentLoaded', function () {
+        // Auto-generate display name in the create user form.
+        const firstNameInput = document.getElementById('first_name');
+        const lastNameInput = document.getElementById('last_name');
+        const displayNameInput = document.getElementById('display_name');
+
+        function updateDisplayName() {
+            // Guard against the elements not being present on the page.
+            if (!firstNameInput || !lastNameInput || !displayNameInput) {
+                return;
+            }
+
+            const firstName = firstNameInput.value.trim();
+            const lastName = lastNameInput.value.trim();
+
+            // Helper function to convert a string to "Sentence case"
+            const toSentenceCase = (str) => {
+                if (!str) return '';
+                return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+            };
+
+            displayNameInput.value = `${toSentenceCase(firstName)} ${toSentenceCase(lastName)}`.trim();
+        }
+
+        if (firstNameInput && lastNameInput) {
+            firstNameInput.addEventListener('input', updateDisplayName);
+            lastNameInput.addEventListener('input', updateDisplayName);
+        }
+    });
+</script>
+{{-- MODIFIED END - 2025-10-10 19:09 --}}
+
 </body>
 </html>
 
