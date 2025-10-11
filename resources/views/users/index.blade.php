@@ -112,7 +112,7 @@
     {{-- Modals Section --}}
 
     {{-- Create Modal --}}
-    @include('users.create')
+    @include('users.modals.create')
     {{-- Password Reset Modals --}}
     @include('users.modals.user-pw-confirm')
     @include('users.modals.user-pw-result')

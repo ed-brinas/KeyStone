@@ -1,14 +1,54 @@
-/**
- * Password Reset Frontend Controller (Laravel + Bootstrap)
- * --------------------------------------------------------
- * Features:
- * ✅ Safe CSRF handling with automatic refresh.
- * ✅ Handles 419 session expiry & retries.
- * ✅ Clean Bootstrap modal integration.
- * ✅ Copy-to-clipboard feedback.
- * ✅ Detailed error logging & graceful fallbacks.
- */
+// MODIFIED START - 2025-10-10 19:09 - Import Bootstrap to enable JS components like modals.
+import 'bootstrap';
+// MODIFIED END - 2025-10-10 19:09
+import './bootstrap';
 
+/**
+ * Attaches event listeners to the user creation form fields
+ * to handle real-time UI logic.
+ */
+function initCreateUserFormLogic() {
+    const firstNameInput = document.getElementById('first_name');
+    const lastNameInput = document.getElementById('last_name');
+    const displayNameInput = document.getElementById('display_name');
+    const mobileNumberInput = document.getElementById('mobile_number');
+
+    if (!firstNameInput || !lastNameInput || !displayNameInput) {
+        console.warn('One or more user creation form elements not found.');
+        return;
+    }
+
+    /**
+     * Updates the Display Name field based on First and Last Name input.
+     */
+    const updateDisplayName = () => {
+        const firstName = firstNameInput.value.trim();
+        const lastName = lastNameInput.value.trim();
+        displayNameInput.value = `${firstName} ${lastName}`.trim();
+    };
+
+    firstNameInput.addEventListener('input', updateDisplayName);
+    lastNameInput.addEventListener('input', updateDisplayName);
+
+    // Initial update in case the form was reloaded with old values
+    updateDisplayName();
+}
+
+// Since the form is in a modal, we only initialize the logic when the modal is shown.
+document.addEventListener('DOMContentLoaded', () => {
+    const userCreateModal = document.getElementById('userCreateModal');
+    if (userCreateModal) {
+        // Use Bootstrap's native event to run the logic when the modal opens
+        userCreateModal.addEventListener('shown.bs.modal', initCreateUserFormLogic);
+    } else {
+        // Fallback for non-modal usage (though unlikely here)
+        initCreateUserFormLogic();
+    }
+});
+
+/**
+    * Password Reset Logic
+ */
 document.addEventListener("DOMContentLoaded", () => {
     // Modal & button references
     const confirmModalEl = document.getElementById("resetPasswordConfirmModal");

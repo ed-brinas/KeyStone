@@ -151,15 +151,19 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:50',
             'last_name' => 'required|string|max:50',
             'date_of_birth' => 'required|date',
-            'mobile_number' => 'required|string|max:20',
+            'mobile_number' => ['required', 'string', 'max:20', 'regex:/^0\d+/'],
             'domain' => 'required|string',
             'account_expires' => 'nullable|date|after:today',
             'groups' => 'nullable|array'
+        ], [
+            'mobile_number.regex' => 'The mobile number must start with the digit 0.'
         ]);
+
 
 
         if ($validator->fails()) {
@@ -172,6 +176,7 @@ class UserController extends Controller
 
             $firstName = $request->first_name;
             $lastName = $request->last_name;
+            // The Display Name must be generated on the server side for AD
             $displayName = "$firstName $lastName";
             $samAccountName = strtolower(substr($firstName, 0, 1) . '.' . $lastName);
 
