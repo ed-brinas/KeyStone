@@ -46,7 +46,7 @@
                         <tr>
                             <td>{{ $user->getFirstAttribute('displayname') }}</td>
                             <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
-                            <td>{{ $selectedDomain ?? 'N/A' }}</td>
+                            <td>{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? 'N/A' }}</td>
                             <td>
                                 @if (substr($user->getFirstAttribute('samaccountname'), -2) === '-a')
                                     <span class="badge bg-dark">Yes</span>
@@ -78,7 +78,11 @@
                                          <i class="bi bi-pencil-fill"></i>
                                     </button>
 
-                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal" data-bs-target="#resetPasswordConfirmModal" data-user-id="{{ $user->getConvertedGuid() }}" data-username="{{ $user->getFirstAttribute('samaccountname') }}">
+                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal"
+                                        data-bs-target="#resetPasswordConfirmModal"
+                                        data-user-id="{{ $user->getConvertedGuid() }}"
+                                        data-username="{{ $user->getFirstAttribute('samaccountname') }}"
+                                        data-domain="{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? '' }}">
                                         <i class="bi bi-key-fill text-secondary"></i>
                                     </button>
 

@@ -330,6 +330,7 @@ class UserController extends Controller
             $this->setLdapConnection($domain);
 
             // Find the user by GUID. Now it uses the correct connection.
+            // This is the line that generates the search and might fail with 'Invalid DN syntax'
             $user = User::findOrFail($guid);
 
             // Generate a new secure password (8+ chars, mixed complexity)

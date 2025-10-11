@@ -30,8 +30,8 @@ document.addEventListener("DOMContentLoaded", () => {
             successModalInstance = new bootstrap.Modal(successModalEl);
     }
 
-    // Current selected user
-    const userContext = { id: null, username: null };
+    // Current selected user - ADDED 'domain' to context
+    const userContext = { id: null, username: null, domain: null };
 
     // 🔄 Toggle loading spinner
     const toggleLoading = (isLoading) => {
@@ -48,6 +48,9 @@ document.addEventListener("DOMContentLoaded", () => {
             const trigger = event.relatedTarget;
             userContext.id = trigger?.getAttribute("data-user-id") || null;
             userContext.username = trigger?.getAttribute("data-username") || "Unknown";
+            // CAPTURE THE DOMAIN FROM THE BUTTON
+            userContext.domain = trigger?.getAttribute("data-domain") || null; 
+            
             const placeholder = confirmModalEl.querySelector("#confirm-username-placeholder");
             if (placeholder) placeholder.textContent = userContext.username;
             toggleLoading(false);
@@ -82,9 +85,19 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const csrfToken = await getCsrfToken();
             if (!csrfToken) throw new Error("CSRF token unavailable. Please refresh and try again.");
+            
+            // Validate that we have the domain context
+            if (!userContext.domain) {
+                 throw new Error("Domain context is missing for the selected user.");
+            }
 
             const apiUrl = `/users/${userContext.id}/reset-password`;
-            console.log(`[RESET] Requesting password reset for user ID ${userContext.id}...`);
+            console.log(`[RESET] Requesting password reset for user ID ${userContext.id} in domain ${userContext.domain}...`);
+            
+            // Construct the payload with the domain context
+            const payload = {
+                domain: userContext.domain
+            };
 
             const response = await fetch(apiUrl, {
                 method: "POST",
@@ -92,8 +105,11 @@ document.addEventListener("DOMContentLoaded", () => {
                     "X-CSRF-TOKEN": csrfToken,
                     "Accept": "application/json",
                     "Content-Type": "application/json",
+                    // Removed 'X-Domain' header as the controller expects it in the body
                 },
                 credentials: "same-origin",
+                // PASS THE DOMAIN CONTEXT IN THE REQUEST BODY
+                body: JSON.stringify(payload) 
             });
 
             // Handle session expiration (419)
@@ -105,8 +121,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Generic HTTP error
             if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Server returned ${response.status}: ${text}`);
+                // MODIFICATION START: Read the response body ONCE as text
+                const responseBody = await response.text(); 
+                
+                let errorMessage = `Server returned ${response.status}: ${responseBody}`;
+
+                // Try to parse the text body as JSON to get a structured error message
+                try {
+                    const errorJson = JSON.parse(responseBody);
+                    // Update error message if a specific 'error' field is present
+                    errorMessage = `Server returned ${response.status}: ${errorJson.error || 'Unknown error'}`;
+                } catch (e) {
+                    // If JSON parsing fails, the errorMessage remains the status code and raw text.
+                    console.warn("[RESET] Failed to parse error response as JSON:", e);
+                }
+                
+                throw new Error(errorMessage);
+                // MODIFICATION END
             }
 
             const data = await response.json();
