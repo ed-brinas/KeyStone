@@ -165,12 +165,9 @@ class UserController extends Controller
             'mobile_number.regex' => 'The mobile number must start with the digit 0.'
         ]);
 
-
-
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#userCreateModal');
         }
-
 
         try {
             $this->setLdapConnection($request->domain);

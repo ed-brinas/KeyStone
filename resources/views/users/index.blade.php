@@ -13,7 +13,6 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h2">User Directory</h1>
-        {{-- ADDED: Hidden input to store the current selected domain for use in AJAX requests --}}
         <input type="hidden" id="current-domain" value="{{ $selectedDomain ?? '' }}">
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userCreateModal">
             Create New User
@@ -118,3 +117,16 @@
     @include('users.modals.user-pw-result')
 
 @endsection
+
+@push('scripts')
+@if (session('open_modal'))
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var myModal = new bootstrap.Modal(document.querySelector('{{ session('open_modal') }}'), {
+            keyboard: false
+        });
+        myModal.show();
+    });
+</script>
+@endif
+@endpush

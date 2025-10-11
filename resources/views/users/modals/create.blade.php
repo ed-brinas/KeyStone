@@ -75,8 +75,8 @@
                     </div>
                      <div class="row">
                          <div class="col-md-6 mb-3">
-                            <label for="account_expires" class="form-label">Account Expiry (Optional)</label>
-                            <input type="date" class="form-control @error('account_expires') is-invalid @enderror" id="account_expires" name="account_expires" value="{{ old('account_expires') }}">
+                            <label for="account_expires" class="form-label">Account Expiry</label>
+                            <input type="date" class="form-control @error('account_expires') is-invalid @enderror" id="account_expires" name="account_expires" value="{{ old('account_expires') }}" required>
 
                             @error('account_expires')
                                 <div class="invalid-feedback">{{ $message }}</div>
