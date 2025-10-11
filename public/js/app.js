@@ -30,8 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
             successModalInstance = new bootstrap.Modal(successModalEl);
     }
 
-    // Current selected user - ADDED 'domain' to context
-    const userContext = { id: null, username: null, domain: null };
+    const userContext = { id: null, username: null, domain: null, dn: null };
 
     // 🔄 Toggle loading spinner
     const toggleLoading = (isLoading) => {
@@ -48,8 +47,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const trigger = event.relatedTarget;
             userContext.id = trigger?.getAttribute("data-user-id") || null;
             userContext.username = trigger?.getAttribute("data-username") || "Unknown";
-            // CAPTURE THE DOMAIN FROM THE BUTTON
             userContext.domain = trigger?.getAttribute("data-domain") || null;
+            userContext.dn = trigger?.getAttribute("data-dn") || null;
 
             const placeholder = confirmModalEl.querySelector("#confirm-username-placeholder");
             if (placeholder) placeholder.textContent = userContext.username;
@@ -96,7 +95,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Construct the payload with the domain context
             const payload = {
-                domain: userContext.domain
+                domain: userContext.domain,
+                dn: userContext.dn
             };
 
             const response = await fetch(apiUrl, {

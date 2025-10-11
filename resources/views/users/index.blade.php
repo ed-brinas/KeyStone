@@ -82,7 +82,8 @@
                                         data-bs-target="#resetPasswordConfirmModal"
                                         data-user-id="{{ $user->getConvertedGuid() }}"
                                         data-username="{{ $user->getFirstAttribute('samaccountname') }}"
-                                        data-domain="{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? '' }}">
+                                        data-domain="{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? '' }}"
+                                        data-dn="{{ $user->getFirstAttribute('distinguishedname') }}">
                                         <i class="bi bi-key-fill text-secondary"></i>
                                     </button>
 

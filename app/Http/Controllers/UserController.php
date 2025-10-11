@@ -318,6 +318,7 @@ class UserController extends Controller
     {
         // Get the domain from the request body (sent by the AJAX call)
         $domain = $request->input('domain');
+        $dn = $request->input('dn');
 
         if (empty($domain)) {
             Log::error("Password reset failed for GUID {$guid}: Domain context missing in request.");
@@ -326,14 +327,11 @@ class UserController extends Controller
         }
 
         try {
-            // 1. CRITICAL: Set the correct LDAP connection (this also defines the Base DN)
+            // Set the correct LDAP connection (this also defines the Base DN)
             $this->setLdapConnection($domain);
 
-            // 2. Query the user using the GUID. Since setDefaultConnection was called above,
-            //    the query should now execute against the dynamically configured connection.
-            $user = User::query()
-                ->where('objectguid', '=', $guid)
-                ->firstOrFail();
+            // Find the user by their distinguished name (DN) or another attribute
+            $user = User::find($dn);
 
             // Generate a new secure password (8+ chars, mixed complexity)
             $newPassword = $this->generatePassword();
