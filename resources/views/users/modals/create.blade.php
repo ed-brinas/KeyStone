@@ -46,7 +46,7 @@
 
                     <div class="mb-3">
                         <label for="display_name" class="form-label">Display Name</label>
-                        <input type="text" class="form-control @error('display_name') is-invalid @enderror" id="display_name" name="display_name" value="{{ old('display_name') }}" required>
+                        <input type="text" class="form-control @error('display_name') is-invalid @enderror" id="display_name" name="display_name" value="{{ old('display_name') }}" readonly>
                         <div class="form-text">This is automatically generated, but can be overridden.</div>
                         @error('display_name')
                             <div class="invalid-feedback">{{ $message }}</div>
@@ -143,9 +143,9 @@
         };
 
         const updateDisplayName = () => {
-            const firstName = firstNameInput.value.trim();
-            const lastName = lastNameInput.value.trim();
-            displayNameInput.value = `${toSentenceCase(firstName)} ${toSentenceCase(lastName)}`.trim();
+            const firstName = toSentenceCase(firstNameInput.value.trim());
+            const lastName = toSentenceCase(lastNameInput.value.trim());
+            displayNameInput.value = `${firstName)} ${lastName}`.trim();
         };
 
         firstNameInput.addEventListener('input', updateDisplayName);
