@@ -329,12 +329,10 @@ class UserController extends Controller
             // 1. CRITICAL: Set the correct LDAP connection (this also defines the Base DN)
             $this->setLdapConnection($domain);
 
-            // 2. Calculate the Base DN for explicit use
-            $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
-
-            // 3. FIX: Explicitly set the Base DN (search root) for the query using ->setBaseDn()
+            // 2. Explicitly query against the dynamically created connection name ($domain)
+            // This is the most reliable way to ensure the Base DN and connection settings are used.
             $user = User::query()
-                ->setBaseDn($baseDn) // <-- CORRECTED: Use setBaseDn() instead of from()
+                ->on($domain) // <-- FIX: Explicitly use the connection named $domain
                 ->where('objectguid', '=', $guid)
                 ->firstOrFail();
 
