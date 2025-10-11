@@ -14,7 +14,3 @@ Route::get('/users', [UserController::class, 'index'])->name('users.index');
 Route::post('/users', [UserController::class, 'store'])->name('users.store');
 Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.update');
 
-// User account actions
-Route::post('/users/{guid}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
-Route::post('/users/{guid}/unlock', [UserController::class, 'unlock'])->name('users.unlock');
-Route::post('/users/{guid}/reset-password', [UserController::class, 'resetPassword'])->name('users.resetPassword');

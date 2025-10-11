@@ -1,0 +1,24 @@
+body {
+    background-color: #f8f9fa;
+}
+.table-actions .btn-link {
+    color: var(--bs-secondary);
+    text-decoration: none;
+    padding: 0.5rem;
+    line-height: 1;
+}
+.table-actions .btn-link:hover {
+    color: var(--bs-dark);
+}
+.navbar-search-form .form-select {
+    max-width: 170px;
+}
+.navbar-search-form .form-control {
+    width: 250px;
+}
+.dropdown-toggle::after {
+    display: none;
+}
+.table-actions .bi {
+    font-size: 1.2rem;
+}

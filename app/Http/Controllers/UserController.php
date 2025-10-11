@@ -17,6 +17,30 @@ use Illuminate\Support\Facades\Log;
 
 class UserController extends Controller
 {
+
+    /**
+     * Dynamically sets the default LDAP connection.
+     *
+     * @param string $domain
+     * @return void
+     */
+    private function setLdapConnection(string $domain): void
+    {
+        $config = config('ldap.connections.default');
+        $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
+        $domainAdServers = config("keystone.adSettings.domain_controllers.{$domain}");
+
+        if (!empty($domainAdServers)) {
+            $config['hosts'] = $domainAdServers;
+        }
+
+        $connection = new Connection($config);
+
+        Container::addConnection($connection, $domain);
+
+        Container::setDefaultConnection($domain);
+    }
+
     /**
      * Display a listing of the resource.
      *
@@ -70,29 +94,6 @@ class UserController extends Controller
         $provisioningOus = config('keystone.provisioning.provisioningOus', []);
         $optionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
         return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error', 'provisioningOus', 'optionalGroups'));
-    }
-
-    /**
-     * Dynamically sets the default LDAP connection.
-     *
-     * @param string $domain
-     * @return void
-     */
-    private function setLdapConnection(string $domain): void
-    {
-        $config = config('ldap.connections.default');
-        $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
-        $domainAdServers = config("keystone.adSettings.domain_controllers.{$domain}");
-
-        if (!empty($domainAdServers)) {
-            $config['hosts'] = $domainAdServers;
-        }
-
-        $connection = new Connection($config);
-
-        Container::addConnection($connection, $domain);
-
-        Container::setDefaultConnection($domain);
     }
 
     /**
@@ -270,101 +271,5 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * Update the account status (enable/disable).
-     *
-     * @param string $guid
-     * @param Request $request
-     * @return \Illuminate\Http\RedirectResponse
-     */
-    public function toggleStatus($guid, Request $request)
-    {
-        try {
-            $this->setLdapConnection($request->input('domain'));
-            $user = User::findOrFail($guid);
-
-            if ($user->isDisabled()) {
-                $user->useraccountcontrol = 512; // Enable Account
-                $message = 'User enabled successfully.';
-            } else {
-                $user->useraccountcontrol = 514; // Disable Account
-                $message = 'User disabled successfully.';
-            }
-            $user->save();
-            return redirect()->back()->with('success', $message);
-        } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Failed to update user status: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Unlock the specified user account.
-     *
-     * @param string $guid
-     * @param Request $request
-     * @return \Illuminate\Http\RedirectResponse
-     */
-    public function unlock($guid, Request $request)
-    {
-        try {
-            $this->setLdapConnection($request->input('domain'));
-            $user = User::findOrFail($guid);
-
-            $user->lockouttime = 0;
-            $user->save();
-
-            return redirect()->back()->with('success', 'User unlocked successfully.');
-        } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Failed to unlock user: ' . $e->getMessage());
-        }
-    }
-
-    // MODIFIED START - Added resetPassword() method for AD user password reset [2025-10-11 17:25]
-    public function resetPassword($guid, Request $request)
-    {
-        try {
-            $domain = $request->input('domain');
-            $user = User::on($domain)->where('objectguid', '=', $guid)->first();
-
-            if (!$user) {
-                return response()->json(['success' => false, 'message' => 'User not found.'], 404);
-            }
-
-            // Generate a new secure password
-            $newPassword = $this->generateStrongPassword();
-
-            // Reset password and unlock if locked
-            $user->setPassword($newPassword);
-            $user->passwordlastset = 0; // Force password change on next login
-
-            if ($user->getFirstAttribute('lockouttime') > 0) {
-                $user->lockouttime = 0; // Unlock account
-            }
-
-            $user->save();
-
-            Log::info('Password reset for user: ' . $user->getFirstAttribute('samaccountname'));
-
-            return response()->json([
-                'success' => true,
-                'username' => $user->getFirstAttribute('samaccountname'),
-                'new_password' => $newPassword
-            ]);
-        } catch (Exception $e) {
-            Log::error('Password reset failed: ' . $e->getMessage(), ['guid' => $guid]);
-            return response()->json(['success' => false, 'message' => 'Error resetting password.'], 500);
-        }
-    }
-
-    private function generateStrongPassword($length = 12)
-    {
-        $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=';
-        $password = '';
-        for ($i = 0; $i < $length; $i++) {
-            $password .= $chars[random_int(0, strlen($chars) - 1)];
-        }
-        return $password;
-    }
-    // MODIFIED END
 
 }
