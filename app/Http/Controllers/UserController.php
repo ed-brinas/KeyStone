@@ -332,9 +332,9 @@ class UserController extends Controller
             // 2. Calculate the Base DN for explicit use
             $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
 
-            // 3. FIX: Explicitly set the Base DN (search root) for the query using ->from()
+            // 3. FIX: Explicitly set the Base DN (search root) for the query using ->setBaseDn()
             $user = User::query()
-                ->setBaseDn($baseDn)
+                ->setBaseDn($baseDn) // <-- CORRECTED: Use setBaseDn() instead of from()
                 ->where('objectguid', '=', $guid)
                 ->firstOrFail();
 
