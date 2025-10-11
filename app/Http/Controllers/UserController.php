@@ -326,12 +326,12 @@ class UserController extends Controller
         }
 
         try {
-            // CRITICAL FIX: Set the correct LDAP connection before searching for the user
+            // CRITICAL: Set the correct LDAP connection before searching for the user
             $this->setLdapConnection($domain);
 
-            // Find the user by GUID. Now it uses the correct connection.
-            // This is the line that generates the search and might fail with 'Invalid DN syntax'
-            $user = User::findOrFail($guid);
+            // FIX: Explicitly initiate a query scope to ensure the new connection's
+            // Base DN is used properly for the GUID search.
+            $user = User::query()->findOrFail($guid);
 
             // Generate a new secure password (8+ chars, mixed complexity)
             $newPassword = $this->generatePassword();

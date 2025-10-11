@@ -49,8 +49,8 @@ document.addEventListener("DOMContentLoaded", () => {
             userContext.id = trigger?.getAttribute("data-user-id") || null;
             userContext.username = trigger?.getAttribute("data-username") || "Unknown";
             // CAPTURE THE DOMAIN FROM THE BUTTON
-            userContext.domain = trigger?.getAttribute("data-domain") || null; 
-            
+            userContext.domain = trigger?.getAttribute("data-domain") || null;
+
             const placeholder = confirmModalEl.querySelector("#confirm-username-placeholder");
             if (placeholder) placeholder.textContent = userContext.username;
             toggleLoading(false);
@@ -85,7 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const csrfToken = await getCsrfToken();
             if (!csrfToken) throw new Error("CSRF token unavailable. Please refresh and try again.");
-            
+
             // Validate that we have the domain context
             if (!userContext.domain) {
                  throw new Error("Domain context is missing for the selected user.");
@@ -93,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const apiUrl = `/users/${userContext.id}/reset-password`;
             console.log(`[RESET] Requesting password reset for user ID ${userContext.id} in domain ${userContext.domain}...`);
-            
+
             // Construct the payload with the domain context
             const payload = {
                 domain: userContext.domain
@@ -109,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 },
                 credentials: "same-origin",
                 // PASS THE DOMAIN CONTEXT IN THE REQUEST BODY
-                body: JSON.stringify(payload) 
+                body: JSON.stringify(payload)
             });
 
             // Handle session expiration (419)
@@ -122,8 +122,8 @@ document.addEventListener("DOMContentLoaded", () => {
             // Generic HTTP error
             if (!response.ok) {
                 // MODIFICATION START: Read the response body ONCE as text
-                const responseBody = await response.text(); 
-                
+                const responseBody = await response.text();
+
                 let errorMessage = `Server returned ${response.status}: ${responseBody}`;
 
                 // Try to parse the text body as JSON to get a structured error message
@@ -135,7 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     // If JSON parsing fails, the errorMessage remains the status code and raw text.
                     console.warn("[RESET] Failed to parse error response as JSON:", e);
                 }
-                
+
                 throw new Error(errorMessage);
                 // MODIFICATION END
             }
