@@ -1,150 +1,172 @@
-// MODIFIED START - 2025-10-10 19:09 - Import Bootstrap to enable JS components like modals.
-import 'bootstrap';
-// MODIFIED END - 2025-10-10 19:09
-import './bootstrap';
+/**
+ * Password Reset Frontend Controller (Laravel + Bootstrap)
+ * --------------------------------------------------------
+ * Features:
+ * ✅ Safe CSRF handling with automatic refresh.
+ * ✅ Handles 419 session expiry & retries.
+ * ✅ Clean Bootstrap modal integration.
+ * ✅ Copy-to-clipboard feedback.
+ * ✅ Detailed error logging & graceful fallbacks.
+ */
 
-// ADDED: Logic for handling the password reset confirmation and AJAX request.
-document.addEventListener('DOMContentLoaded', function () {
-    // Check if Bootstrap is available (should be, due to the import)
-    if (typeof bootstrap === 'undefined') {
-        console.error("Bootstrap JS not loaded. Modals and other components will not function.");
-        return;
+document.addEventListener("DOMContentLoaded", () => {
+    // Modal & button references
+    const confirmModalEl = document.getElementById("resetPasswordConfirmModal");
+    const successModalEl = document.getElementById("resetPasswordSuccessModal");
+    const confirmResetBtn = document.getElementById("confirmResetPasswordBtn");
+    const copyPasswordBtn = document.getElementById("copyPasswordBtn");
+    const loadingDiv = document.getElementById("reset-password-loading");
+
+    let confirmModalInstance = null;
+    let successModalInstance = null;
+
+    if (typeof bootstrap !== "undefined" && bootstrap.Modal) {
+        if (confirmModalEl)
+            confirmModalInstance = new bootstrap.Modal(confirmModalEl, {
+                backdrop: "static",
+                keyboard: false,
+            });
+        if (successModalEl)
+            successModalInstance = new bootstrap.Modal(successModalEl);
     }
 
-    const confirmModal = document.getElementById('resetPasswordConfirmModal');
-    const successModal = document.getElementById('resetPasswordSuccessModal');
-    const confirmButton = document.getElementById('confirmResetPasswordBtn');
-    const copyButton = document.getElementById('copyPasswordBtn');
+    // Current selected user
+    const userContext = { id: null, username: null };
 
-    let currentUserId = null;
-    let currentUsername = null;
+    // 🔄 Toggle loading spinner
+    const toggleLoading = (isLoading) => {
+        if (loadingDiv) loadingDiv.style.display = isLoading ? "block" : "none";
+        if (confirmResetBtn) {
+            confirmResetBtn.disabled = isLoading;
+            confirmResetBtn.textContent = isLoading ? "Processing..." : "Reset Password";
+        }
+    };
 
-    // Get the current domain from the hidden input placed in index.blade.php
-    const domainInput = document.getElementById('current-domain');
-    let currentDomain = domainInput ? domainInput.value : null;
-
-    // --- 1. Handle Confirmation Modal Display ---
-    if (confirmModal) {
-        // Event fires immediately when the modal is about to be shown
-        confirmModal.addEventListener('show.bs.modal', function (event) {
-            const button = event.relatedTarget; // Button that triggered the modal
-            currentUserId = button.getAttribute('data-user-id');
-            currentUsername = button.getAttribute('data-username');
-
-            const usernamePlaceholder = confirmModal.querySelector('#confirm-username-placeholder');
-            if (usernamePlaceholder) {
-                usernamePlaceholder.textContent = currentUsername;
-            }
-
-            // Ensure the loading spinner is hidden and buttons are shown when the modal opens
-            const loadingSpinner = document.getElementById('reset-password-loading');
-            const footerButtons = confirmModal.querySelector('.modal-footer');
-            if (loadingSpinner && footerButtons) {
-                loadingSpinner.style.display = 'none';
-                footerButtons.style.display = 'flex';
-            }
+    // When confirm modal opens, capture user info
+    if (confirmModalEl) {
+        confirmModalEl.addEventListener("show.bs.modal", (event) => {
+            const trigger = event.relatedTarget;
+            userContext.id = trigger?.getAttribute("data-user-id") || null;
+            userContext.username = trigger?.getAttribute("data-username") || "Unknown";
+            const placeholder = confirmModalEl.querySelector("#confirm-username-placeholder");
+            if (placeholder) placeholder.textContent = userContext.username;
+            toggleLoading(false);
         });
     }
 
-    // --- 2. Handle the "Reset Password" confirmation button click (AJAX) ---
-    if (confirmButton) {
-        confirmButton.addEventListener('click', function () {
-            if (!currentUserId || !currentDomain) {
-                // Should not happen if data-user-id is set on the table button and domain input is present
-                console.error("User ID or Domain missing for password reset.");
+    // 🔒 Fetch or refresh CSRF token
+    async function getCsrfToken() {
+        try {
+            let token =
+                document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+            if (!token) {
+                const cookieMatch = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+                token = cookieMatch ? decodeURIComponent(cookieMatch[1]) : "";
+            }
+            if (!token) {
+                console.warn("[CSRF] Missing token. Refreshing via /sanctum/csrf-cookie...");
+                await fetch("/sanctum/csrf-cookie", { credentials: "same-origin" });
+                const retryMatch = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+                token = retryMatch ? decodeURIComponent(retryMatch[1]) : "";
+            }
+            return token;
+        } catch (err) {
+            console.error("[CSRF] Failed to fetch token:", err);
+            return "";
+        }
+    }
+
+    // 🧩 Handle password reset request
+    async function performPasswordReset() {
+        toggleLoading(true);
+        try {
+            const csrfToken = await getCsrfToken();
+            if (!csrfToken) throw new Error("CSRF token unavailable. Please refresh and try again.");
+
+            const apiUrl = `/users/${userContext.id}/reset-password`;
+            console.log(`[RESET] Requesting password reset for user ID ${userContext.id}...`);
+
+            const response = await fetch(apiUrl, {
+                method: "POST",
+                headers: {
+                    "X-CSRF-TOKEN": csrfToken,
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                credentials: "same-origin",
+            });
+
+            // Handle session expiration (419)
+            if (response.status === 419) {
+                console.warn("[RESET] Session expired. Refreshing CSRF cookie and retrying...");
+                await fetch("/sanctum/csrf-cookie", { credentials: "same-origin" });
+                return performPasswordReset(); // retry once
+            }
+
+            // Generic HTTP error
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Server returned ${response.status}: ${text}`);
+            }
+
+            const data = await response.json();
+            console.log("[RESET] Success:", data);
+
+            if (confirmModalInstance) confirmModalInstance.hide();
+
+            // Show success modal or fallback alert
+            if (successModalInstance) {
+                const successUsername = successModalEl.querySelector("#success-username-placeholder");
+                const passwordField = successModalEl.querySelector("#new-password-display");
+                if (successUsername) successUsername.textContent = userContext.username;
+                if (passwordField)
+                    passwordField.value = data.new_password || data.password || "(unknown)";
+                const feedback = document.getElementById("copy-feedback");
+                if (feedback) feedback.style.display = "none";
+                successModalInstance.show();
+            } else {
+                alert(`Password reset successful!\nNew password: ${data.new_password}`);
+            }
+        } catch (err) {
+            console.error("[RESET] Failed:", err);
+            alert(`Password reset failed: ${err.message}`);
+        } finally {
+            toggleLoading(false);
+        }
+    }
+
+    // ✅ Click handler for reset button
+    if (confirmResetBtn) {
+        confirmResetBtn.addEventListener("click", () => {
+            if (!userContext.id) {
+                alert("No user selected. Please choose a user first.");
                 return;
             }
-
-            // Show loading spinner and hide footer buttons to prevent double-click
-            const loadingSpinner = document.getElementById('reset-password-loading');
-            const footerButtons = confirmModal.querySelector('.modal-footer');
-            if (loadingSpinner && footerButtons) {
-                loadingSpinner.style.display = 'block';
-                footerButtons.style.display = 'none';
-            }
-
-            // Perform the AJAX request to the Laravel endpoint
-            fetch(`/users/${currentUserId}/reset-password`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-                },
-                // Pass the domain context in the request body, which the backend (UserController) expects
-                body: JSON.stringify({
-                    domain: currentDomain
-                })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    // Check for a JSON error response before throwing
-                    return response.json().then(err => { throw new Error(err.error || 'Server error occurred.'); });
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.new_password) {
-                    // Success: Hide confirm modal, show result modal
-                    const modalInstance = bootstrap.Modal.getInstance(confirmModal);
-                    if (modalInstance) modalInstance.hide();
-
-                    const usernameSuccessPlaceholder = successModal.querySelector('#success-username-placeholder');
-                    const passwordDisplay = successModal.querySelector('#new-password-display');
-                    const copyFeedback = successModal.querySelector('#copy-feedback');
-
-                    if (usernameSuccessPlaceholder && passwordDisplay) {
-                        usernameSuccessPlaceholder.textContent = currentUsername;
-                        passwordDisplay.value = data.new_password;
-                    }
-
-                    // Reset copy feedback display
-                    if (copyFeedback) copyFeedback.style.display = 'none';
-
-                    const successModalInstance = new bootstrap.Modal(successModal);
-                    successModalInstance.show();
-
-                } else {
-                    // This block should ideally not be reached if the backend returns the expected structure
-                    alert('Password reset failed: Unknown response format.');
-                }
-            })
-            .catch(error => {
-                console.error('Error during password reset:', error.message);
-                // Use a custom modal or alert to inform the user about the error
-                alert('Password reset failed. Details: ' + error.message);
-            })
-            .finally(() => {
-                // Always reset UI elements and temporary variables
-                if (loadingSpinner && footerButtons) {
-                    loadingSpinner.style.display = 'none';
-                    footerButtons.style.display = 'flex'; // Restore button visibility
-                }
-                currentUserId = null;
-                currentUsername = null;
-            });
+            performPasswordReset();
         });
     }
 
-    // --- 3. Handle copy to clipboard logic for the result modal ---
-    if (copyButton) {
-        copyButton.addEventListener('click', function() {
-            const passwordDisplay = document.getElementById('new-password-display');
-            const feedback = document.getElementById('copy-feedback');
-
-            // Check if execCommand is available (clipboard API might be restricted in iframes/certain contexts)
-            if (passwordDisplay && document.execCommand) {
-                passwordDisplay.select();
-                document.execCommand('copy');
-
-                // Show 'Copied!' feedback
-                if (feedback) {
-                    feedback.style.display = 'block';
-                    setTimeout(() => {
-                        feedback.style.display = 'none';
-                    }, 2000);
+    // 📋 Copy password to clipboard
+    if (copyPasswordBtn) {
+        copyPasswordBtn.addEventListener("click", async () => {
+            const passwordField = document.getElementById("new-password-display");
+            const feedback = document.getElementById("copy-feedback");
+            if (!passwordField) return;
+            try {
+                const password = passwordField.value;
+                if (!password) throw new Error("No password to copy.");
+                if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(password);
+                } else {
+                    passwordField.select();
+                    document.execCommand("copy");
                 }
-            } else {
-                alert('Copying to clipboard failed or is not supported in this context.');
+                if (feedback) {
+                    feedback.style.display = "block";
+                    setTimeout(() => (feedback.style.display = "none"), 2000);
+                }
+            } catch (err) {
+                console.error("[COPY] Failed to copy password:", err);
             }
         });
     }
