@@ -326,12 +326,17 @@ class UserController extends Controller
         }
 
         try {
-            // CRITICAL: Set the correct LDAP connection before searching for the user
+            // 1. CRITICAL: Set the correct LDAP connection (this also defines the Base DN)
             $this->setLdapConnection($domain);
 
-            // FIX: Explicitly initiate a query scope to ensure the new connection's
-            // Base DN is used properly for the GUID search.
-            $user = User::query()->findOrFail($guid);
+            // 2. Calculate the Base DN for explicit use
+            $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
+
+            // 3. FIX: Explicitly set the Base DN (search root) for the query using ->from()
+            $user = User::query()
+                ->setBaseDn($baseDn)
+                ->where('objectguid', '=', $guid)
+                ->firstOrFail();
 
             // Generate a new secure password (8+ chars, mixed complexity)
             $newPassword = $this->generatePassword();
@@ -367,9 +372,9 @@ class UserController extends Controller
             Log::error("Password reset failed for GUID {$guid} in domain {$domain}: " . $e->getMessage());
             return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
         } catch (\Exception $e) {
-            // Changed the log message to include the domain for better debugging
+            // FIX: Return the actual error message to the frontend for better debugging
             Log::error("General error during password reset for GUID {$guid} in domain {$domain}: " . $e->getMessage());
-            return response()->json(['error' => 'An unexpected error occurred.'], 500);
+            return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
         }
     }
 
