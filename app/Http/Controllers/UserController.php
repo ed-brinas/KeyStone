@@ -155,6 +155,7 @@ class UserController extends Controller
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:50',
             'last_name' => 'required|string|max:50',
+            'display_name' => 'required|string|max:100',
             'date_of_birth' => 'required|date',
             'mobile_number' => ['required', 'string', 'max:20', 'regex:/^0\d+/'],
             'domain' => 'required|string',
@@ -176,8 +177,7 @@ class UserController extends Controller
 
             $firstName = $request->first_name;
             $lastName = $request->last_name;
-            // The Display Name must be generated on the server side for AD
-            $displayName = "$firstName $lastName";
+            $displayName = $request->display_name;
             $samAccountName = strtolower(substr($firstName, 0, 1) . '.' . $lastName);
 
             if (User::where('samaccountname', '=', $samAccountName)->exists()) {
