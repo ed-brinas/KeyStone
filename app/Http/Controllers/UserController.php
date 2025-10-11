@@ -329,10 +329,9 @@ class UserController extends Controller
             // 1. CRITICAL: Set the correct LDAP connection (this also defines the Base DN)
             $this->setLdapConnection($domain);
 
-            // 2. Explicitly query against the dynamically created connection name ($domain)
-            // This is the most reliable way to ensure the Base DN and connection settings are used.
+            // 2. Query the user using the GUID. Since setDefaultConnection was called above,
+            //    the query should now execute against the dynamically configured connection.
             $user = User::query()
-                ->on($domain) // <-- FIX: Explicitly use the connection named $domain
                 ->where('objectguid', '=', $guid)
                 ->firstOrFail();
 
