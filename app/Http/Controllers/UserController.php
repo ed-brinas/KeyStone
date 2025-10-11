@@ -271,5 +271,44 @@ class UserController extends Controller
         }
     }
 
+    /**
+     * Reset a user's password and unlock the account if locked.
+     *
+     * This function:
+     * 1. Locates the user by ID.
+     * 2. Generates a new random secure password.
+     * 3. Calls the Active Directory (or internal) service to reset and unlock the account.
+     * 4. Logs the action for auditing.
+     * 5. Returns the new password to the frontend for display.
+     */
+    public function resetPassword($id)
+    {
+        // Retrieve the target user record by ID
+        $user = User::findOrFail($id);
+
+        // Generate a new secure password (8+ chars, mixed complexity)
+        $newPassword = Str::random(10) . '!';
+
+        // Perform the AD password reset and unlock operation
+        // The adService handles connection and LDAP/AD interactions.
+        $success = $this->adService->resetAndUnlockAccount($user->username, $newPassword);
+
+        // If the reset succeeds, record the event and return the new password
+        if ($success) {
+            AuditLog::create([
+                'admin'        => auth()->user()->username, // Administrator performing the reset
+                'action'       => 'Reset Password',          // Action type
+                'target_user'  => $user->username,           // Affected account
+                'status'       => 'Success',                 // Outcome
+                'ip_address'   => request()->ip()            // Source IP for traceability
+            ]);
+
+            // Return the newly generated password to the frontend
+            return response()->json(['new_password' => $newPassword]);
+        }
+
+        // On failure, return a 500 error response
+        return response()->json(['error' => 'Failed to reset password'], 500);
+    }
 
 }

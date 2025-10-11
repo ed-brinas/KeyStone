@@ -76,7 +76,7 @@
                                          <i class="bi bi-pencil-fill"></i>
                                     </button>
 
-                                    <button type="button" class="btn btn-link p-2 reset-password-btn" title="Reset Password" data-guid="{{ $user->getConvertedGuid() }}" data-username="{{ $user->getFirstAttribute('samaccountname') }}">
+                                    <button type="button" class="btn btn-link p-2 reset-password-btn" title="Reset Password" data-username="{{ $user->username }}" data-id="{{ $user->id }}">
                                         <i class="bi bi-key-fill text-secondary"></i>
                                     </button>
 
@@ -96,8 +96,8 @@
         </div>
     </div>
 
-
     @include('users.create')
+    @include('users.reset.password')
 
     @if(isset($users))
         @foreach($users as $user)
