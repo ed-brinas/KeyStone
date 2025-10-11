@@ -14,8 +14,8 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
-
-
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Storage;
 
 class UserController extends Controller
 {
@@ -165,9 +165,12 @@ class UserController extends Controller
             'mobile_number.regex' => 'The mobile number must start with the digit 0.'
         ]);
 
+
+
         if ($validator->fails()) {
             return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#userCreateModal');
         }
+
 
         try {
             $this->setLdapConnection($request->domain);
@@ -202,7 +205,7 @@ class UserController extends Controller
             $user->unicodepwd = Password::encode($password);
 
             $user->mobile = $request->mobile_number;
-            $user->extensionattribute1 = $request->date_of_birth;
+            $user->description = $request->date_of_birth;
 
             if ($request->filled('account_expires')) {
                 $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
@@ -226,8 +229,18 @@ class UserController extends Controller
             $user->pwdlastset = -1;
             $user->save();
 
+            $pdf = Pdf::loadView('users.pdf', [
+                'domain' => $request->domain,
+                'displayName' => $displayName,
+                'username' => $samAccountName,
+                'password' => $password
+            ]);
+
+            $fileName = 'user_credentials_' . $samAccountName . '.pdf';
+            Storage::put('private/' . $fileName, $pdf->output());
+
             $successMessage = "User created successfully. Temporary Password: <strong>$password</strong>";
-            return redirect()->route('users.index')->with('success', $successMessage);
+            return redirect()->route('users.index')->with('success', $successMessage)->with('pdf_download_link', route('users.download-pdf', $fileName));
 
         } catch (\Exception $e) {
 
@@ -271,7 +284,7 @@ class UserController extends Controller
             $user->displayname = $request->first_name . ' ' . $request->last_name;
 
             $user->mobile = $request->mobile_number;
-            $user->extensionattribute1 = $request->date_of_birth;
+            $user->description = $request->date_of_birth;
 
             if ($request->filled('account_expires')) {
                 $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
@@ -375,4 +388,11 @@ class UserController extends Controller
         }
     }
 
+    /**
+    * Download the generated credentials PDF.
+    */
+    public function downloadPdf($filename)
+    {
+        return Storage::download('private/' . $filename);
+    }
 }

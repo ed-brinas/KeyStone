@@ -15,4 +15,5 @@ Route::prefix('users')->name('users.')->controller(UserController::class)->group
     Route::post('/', 'store')->name('store');
     Route::put('/{guid}', 'update')->name('update');
     Route::post('/{guid}/reset-password', 'resetPassword')->name('resetPassword');
+    Route::get('/download-pdf/{filename}', 'downloadPdf')->name('download-pdf');
 });
