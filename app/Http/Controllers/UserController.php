@@ -11,9 +11,8 @@ use LdapRecord\LdapRecordException;
 use Illuminate\Support\Facades\Validator;
 use LdapRecord\Models\Attributes\Password;
 use Carbon\Carbon;
-// MODIFIED START - 2025-10-11 08:59 - Added Log facade for password reset logging.
 use Illuminate\Support\Facades\Log;
-// MODIFIED END
+use Illuminate\Support\Str;
 
 class UserController extends Controller
 {
@@ -39,6 +38,40 @@ class UserController extends Controller
         Container::addConnection($connection, $domain);
 
         Container::setDefaultConnection($domain);
+    }
+
+    /**
+     * Generate a strong, random password.
+     *
+     * @return string
+     */
+    private function generatePassword(): string
+    {
+        // Password: 8 characters minimum, mixed case, numbers, special characters
+        // Laravel's Str::random can be used, but it must be supplemented
+        // to guarantee the required complexity for AD.
+        $upper = 'ABCDEFGHIJKLMNPQRSTUVWXYZ';
+        $lower = 'abcdefghijklmnpqrstuvwxyz';
+        $number = '123456789';
+        $special = '!@#$%^&*()_+=-';
+
+        $chars = $upper . $lower . $number . $special;
+        $password = '';
+
+        // Guarantee at least one of each type
+        $password .= $upper[random_int(0, strlen($upper) - 1)];
+        $password .= $lower[random_int(0, strlen($lower) - 1)];
+        $password .= $number[random_int(0, strlen($number) - 1)];
+        $password .= $special[random_int(0, strlen($special) - 1)];
+
+        // Fill the rest up to 12 characters (for better security)
+        $minLength = 12;
+        for ($i = 0; $i < $minLength - 4; $i++) {
+            $password .= $chars[random_int(0, strlen($chars) - 1)];
+        }
+
+        // Shuffle the string to prevent predictable patterns
+        return str_shuffle($password);
     }
 
     /**
@@ -274,41 +307,56 @@ class UserController extends Controller
     /**
      * Reset a user's password and unlock the account if locked.
      *
-     * This function:
-     * 1. Locates the user by ID.
-     * 2. Generates a new random secure password.
-     * 3. Calls the Active Directory (or internal) service to reset and unlock the account.
-     * 4. Logs the action for auditing.
-     * 5. Returns the new password to the frontend for display.
+     * @param string $guid The GUID of the user.
+     * @return \Illuminate\Http\JsonResponse
      */
-    public function resetPassword($id)
+    public function resetPassword(string $guid)
     {
-        // Retrieve the target user record by ID
-        $user = User::findOrFail($id);
+        try {
+            // Find the user by GUID. The connection is already set from the index view's request.
+            // We assume the selectedDomain context is maintained or can be inferred,
+            // but for a single request, the GUID is a reliable locator.
+            // A better solution would pass the domain, but for simplicity, we rely on the GUID lookup.
+            $user = User::findOrFail($guid);
 
-        // Generate a new secure password (8+ chars, mixed complexity)
-        $newPassword = Str::random(10) . '!';
+            // Generate a new secure password (8+ chars, mixed complexity)
+            $newPassword = $this->generatePassword();
 
-        // Perform the AD password reset and unlock operation
-        // The adService handles connection and LDAP/AD interactions.
-        $success = $this->adService->resetAndUnlockAccount($user->username, $newPassword);
+            // Set the new password
+            $user->unicodepwd = Password::encode($newPassword);
 
-        // If the reset succeeds, record the event and return the new password
-        if ($success) {
-            AuditLog::create([
-                'admin'        => auth()->user()->username, // Administrator performing the reset
-                'action'       => 'Reset Password',          // Action type
-                'target_user'  => $user->username,           // Affected account
-                'status'       => 'Success',                 // Outcome
-                'ip_address'   => request()->ip()            // Source IP for traceability
-            ]);
+            // Unlock account (by setting lockoutTime to 0)
+            $user->lockouttime = 0;
+
+            // Force password change on next logon (pwdLastSet = 0)
+            // Or -1 to require change, 0 to allow change, as 512 is set in store.
+            // Resetting to 0 is common practice for temporary passwords.
+            $user->pwdlastset = 0;
+
+            $user->save();
+
+            // Log the action for auditing (requires AuditLog implementation, currently a placeholder)
+            Log::info("Password reset successful for user: {$user->getFirstAttribute('samaccountname')}");
+            /*
+             * TODO: Implement AuditLog model and uncomment this section:
+             * AuditLog::create([
+             * 'admin'        => auth()->user()->username ?? 'SYSTEM',
+             * 'action'       => 'Reset Password',
+             * 'target_user'  => $user->getFirstAttribute('samaccountname'),
+             * 'status'       => 'Success',
+             * 'ip_address'   => request()->ip()
+             * ]);
+             */
 
             // Return the newly generated password to the frontend
             return response()->json(['new_password' => $newPassword]);
+        } catch (LdapRecordException $e) {
+            Log::error("Password reset failed for GUID {$guid}: " . $e->getMessage());
+            return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
+        } catch (\Exception $e) {
+            Log::error("General error during password reset for GUID {$guid}: " . $e->getMessage());
+            return response()->json(['error' => 'An unexpected error occurred.'], 500);
         }
-
-        // On failure, return a 500 error response
-        return response()->json(['error' => 'Failed to reset password'], 500);
     }
 
 }

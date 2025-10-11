@@ -76,10 +76,9 @@
                                          <i class="bi bi-pencil-fill"></i>
                                     </button>
 
-                                    <button type="button" class="btn btn-link p-2 reset-password-btn" title="Reset Password" data-username="{{ $user->username }}" data-id="{{ $user->id }}">
+                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal" data-bs-target="#resetPasswordConfirmModal" data-user-id="{{ $user->getConvertedGuid() }}" data-username="{{ $user->getFirstAttribute('samaccountname') }}">
                                         <i class="bi bi-key-fill text-secondary"></i>
                                     </button>
-
 
                                 </div>
                             </td>
@@ -96,13 +95,19 @@
         </div>
     </div>
 
-    @include('users.create')
-    @include('users.reset.password')
 
     @if(isset($users))
         @foreach($users as $user)
             @include('users.edit', ['user' => $user, 'domain' => $selectedDomain, 'optionalGroups' => $optionalGroups])
         @endforeach
     @endif
+
+    {{-- Modals Section --}}
+
+    {{-- Create Modal --}}
+    @include('users.create')
+    {{-- Password Reset Modals --}}
+    @include('modals.user-pw-confirm')
+    @include('modals.user-pw-result')
 
 @endsection
