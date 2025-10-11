@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>KeyStone - AD User Management</title>
 
+    <!-- MODIFIED START - 2025-10-11 09:06 - Added CSRF token meta tag required for AJAX POST requests. -->
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <!-- MODIFIED END -->
+
     <link href="{{ asset('css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ asset('css/bootstrap-icons/bootstrap-icons.min.css') }}" rel="stylesheet">
 
@@ -308,14 +312,31 @@
         document.getElementById('confirmGlobalResetBtn').addEventListener('click', function () {
             if (!selectedUserGuid) return;
 
-            fetch(`/users/reset-password/${selectedUserGuid}`, {
+            // MODIFIED START - 2025-10-11 09:03 - Corrected fetch URL structure to match Laravel route: /users/{guid}/reset-password.
+            const domain = document.querySelector('select[name="domain"]').value;
+
+            fetch(`/users/${selectedUserGuid}/reset-password`, {
+            // MODIFIED END
                 method: 'POST',
                 headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-                    'Accept': 'application/json'
-                }
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '',
+                    'Accept': 'application/json',
+                    // MODIFIED START - 2025-10-11 08:59 - Explicitly set Content-Type for passing domain in body.
+                    'Content-Type': 'application/json'
+                    // MODIFIED END
+                },
+                // MODIFIED START - 2025-10-11 08:59 - Include domain in the request body.
+                body: JSON.stringify({ domain: domain, _token: document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '' })
+                // MODIFIED END
             })
-            .then(response => response.json())
+            .then(response => {
+                 // MODIFIED START - 2025-10-11 08:59 - Handle non-200 responses to show better error messages.
+                 if (!response.ok) {
+                    throw new Error('Server returned an error: ' + response.status);
+                 }
+                 // MODIFIED END
+                 return response.json();
+            })
             .then(data => {
                 const confirmModal = bootstrap.Modal.getInstance(document.getElementById('confirmGlobalResetModal'));
                 confirmModal.hide();
@@ -327,11 +348,13 @@
                     const resultModal = new bootstrap.Modal(document.getElementById('resetResultModal'));
                     resultModal.show();
                 } else {
-                    alert('Password reset failed.');
+                    alert('Password reset failed: ' + (data.message || 'Unknown error.'));
                 }
             })
             .catch(err => {
-                alert('An error occurred during password reset.');
+                const confirmModal = bootstrap.Modal.getInstance(document.getElementById('confirmGlobalResetModal'));
+                confirmModal.hide();
+                alert('An error occurred during password reset: ' + err.message);
                 console.error(err);
             });
         });
