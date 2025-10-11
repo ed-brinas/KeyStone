@@ -13,6 +13,8 @@
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h1 class="h2">User Directory</h1>
+        {{-- ADDED: Hidden input to store the current selected domain for use in AJAX requests --}}
+        <input type="hidden" id="current-domain" value="{{ $selectedDomain ?? '' }}">
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userCreateModal">
             Create New User
         </button>
@@ -107,7 +109,7 @@
     {{-- Create Modal --}}
     @include('users.create')
     {{-- Password Reset Modals --}}
-    @include('modals.user-pw-confirm')
-    @include('modals.user-pw-result')
+    @include('users.modals.user-pw-confirm')
+    @include('users.modals.user-pw-result')
 
 @endsection

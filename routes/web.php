@@ -10,9 +10,9 @@ Route::get('/', function () {
 });
 
 // User management routes
-Route::get('/users', [UserController::class, 'index'])->name('users.index');
-Route::post('/users', [UserController::class, 'store'])->name('users.store');
-Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.update');
-Route::put('/users/{guid}', [UserController::class, 'update'])->name('users.update');
-Route::post('/users/{guid}/reset-password', [UserController::class, 'resetPassword'])->name('users.resetPassword');
-
+Route::prefix('users')->name('users.')->controller(UserController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::post('/', 'store')->name('store');
+    Route::put('/{guid}', 'update')->name('update');
+    Route::post('/{guid}/reset-password', 'resetPassword')->name('resetPassword');
+});

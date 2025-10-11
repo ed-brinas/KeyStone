@@ -13,6 +13,9 @@ use LdapRecord\Models\Attributes\Password;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Hash;
+
+
 
 class UserController extends Controller
 {
@@ -307,16 +310,26 @@ class UserController extends Controller
     /**
      * Reset a user's password and unlock the account if locked.
      *
+     * @param Request $request
      * @param string $guid The GUID of the user.
      * @return \Illuminate\Http\JsonResponse
      */
-    public function resetPassword(string $guid)
+    public function resetPassword(Request $request, string $guid) // <-- MODIFIED signature
     {
+        // Get the domain from the request body (sent by the AJAX call)
+        $domain = $request->input('domain');
+
+        if (empty($domain)) {
+            Log::error("Password reset failed for GUID {$guid}: Domain context missing in request.");
+            // Return a 400 error if the domain is missing
+            return response()->json(['error' => 'Domain context is required for password reset.'], 400);
+        }
+
         try {
-            // Find the user by GUID. The connection is already set from the index view's request.
-            // We assume the selectedDomain context is maintained or can be inferred,
-            // but for a single request, the GUID is a reliable locator.
-            // A better solution would pass the domain, but for simplicity, we rely on the GUID lookup.
+            // CRITICAL FIX: Set the correct LDAP connection before searching for the user
+            $this->setLdapConnection($domain);
+
+            // Find the user by GUID. Now it uses the correct connection.
             $user = User::findOrFail($guid);
 
             // Generate a new secure password (8+ chars, mixed complexity)
@@ -329,14 +342,12 @@ class UserController extends Controller
             $user->lockouttime = 0;
 
             // Force password change on next logon (pwdLastSet = 0)
-            // Or -1 to require change, 0 to allow change, as 512 is set in store.
-            // Resetting to 0 is common practice for temporary passwords.
             $user->pwdlastset = 0;
 
             $user->save();
 
-            // Log the action for auditing (requires AuditLog implementation, currently a placeholder)
-            Log::info("Password reset successful for user: {$user->getFirstAttribute('samaccountname')}");
+            // Log the action for auditing
+            Log::info("Password reset successful for user: {$user->getFirstAttribute('samaccountname')} in domain {$domain}");
             /*
              * TODO: Implement AuditLog model and uncomment this section:
              * AuditLog::create([
@@ -351,10 +362,12 @@ class UserController extends Controller
             // Return the newly generated password to the frontend
             return response()->json(['new_password' => $newPassword]);
         } catch (LdapRecordException $e) {
-            Log::error("Password reset failed for GUID {$guid}: " . $e->getMessage());
+            // Changed the log message to include the domain for better debugging
+            Log::error("Password reset failed for GUID {$guid} in domain {$domain}: " . $e->getMessage());
             return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
         } catch (\Exception $e) {
-            Log::error("General error during password reset for GUID {$guid}: " . $e->getMessage());
+            // Changed the log message to include the domain for better debugging
+            Log::error("General error during password reset for GUID {$guid} in domain {$domain}: " . $e->getMessage());
             return response()->json(['error' => 'An unexpected error occurred.'], 500);
         }
     }

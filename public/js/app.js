@@ -1,157 +1,151 @@
-/**
- * Consolidated Application Logic (app.js)
- * * This file contains two main modules:
- * 1. Initial Load Handler: For showing session-based modals and auto-generating display names.
- * 2. User Password Reset: A module for handling the reset password flow (confirmation, API call, success).
- */
+// MODIFIED START - 2025-10-10 19:09 - Import Bootstrap to enable JS components like modals.
+import 'bootstrap';
+// MODIFIED END - 2025-10-10 19:09
+import './bootstrap';
 
-document.addEventListener('DOMContentLoaded', () => {
-    // --- 1. Initial Load Handler (Modal & Display Name) ---
-
-    // Automatically open a modal if its ID is present in the session (Laravel/Blade integration)
-    const sessionModalId = '@json(session("open_modal"))';
-    if (sessionModalId) {
-        const modalElement = document.querySelector(sessionModalId);
-        // Assumes Bootstrap is loaded globally
-        if (modalElement && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-            new bootstrap.Modal(modalElement).show();
-        }
+// ADDED: Logic for handling the password reset confirmation and AJAX request.
+document.addEventListener('DOMContentLoaded', function () {
+    // Check if Bootstrap is available (should be, due to the import)
+    if (typeof bootstrap === 'undefined') {
+        console.error("Bootstrap JS not loaded. Modals and other components will not function.");
+        return;
     }
 
-    // Auto-generate display name from first and last names
-    const firstNameInput = document.getElementById('first_name');
-    const lastNameInput = document.getElementById('last_name');
-    const displayNameInput = document.getElementById('display_name');
+    const confirmModal = document.getElementById('resetPasswordConfirmModal');
+    const successModal = document.getElementById('resetPasswordSuccessModal');
+    const confirmButton = document.getElementById('confirmResetPasswordBtn');
+    const copyButton = document.getElementById('copyPasswordBtn');
 
-    /** Converts a string to Sentence Case. */
-    const toSentenceCase = str => str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : '';
+    let currentUserId = null;
+    let currentUsername = null;
 
-    /** Updates the display name field based on current first/last name inputs. */
-    const updateDisplayName = () => {
-        if (firstNameInput && lastNameInput && displayNameInput) {
-            const firstName = firstNameInput.value.trim();
-            const lastName = lastNameInput.value.trim();
-            // Concatenate, convert to Sentence Case, and trim any excess whitespace
-            displayNameInput.value = `${toSentenceCase(firstName)} ${toSentenceCase(lastName)}`.trim();
-        }
-    };
+    // Get the current domain from the hidden input placed in index.blade.php
+    const domainInput = document.getElementById('current-domain');
+    let currentDomain = domainInput ? domainInput.value : null;
 
-    if (firstNameInput && lastNameInput) {
-        firstNameInput.addEventListener('input', updateDisplayName);
-        lastNameInput.addEventListener('input', updateDisplayName);
-    }
+    // --- 1. Handle Confirmation Modal Display ---
+    if (confirmModal) {
+        // Event fires immediately when the modal is about to be shown
+        confirmModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget; // Button that triggered the modal
+            currentUserId = button.getAttribute('data-user-id');
+            currentUsername = button.getAttribute('data-username');
 
-
-    // --- 2. User Password Reset Module ---
-
-    const confirmModalEl = document.getElementById('resetPasswordConfirmModal');
-    const successModalEl = document.getElementById('resetPasswordSuccessModal');
-    const confirmResetBtn = document.getElementById('confirmResetPasswordBtn');
-    const copyPasswordBtn = document.getElementById('copyPasswordBtn');
-    const loadingDiv = document.getElementById('reset-password-loading');
-
-    // Global state to store the user info captured from the trigger button
-    let userContext = {
-        id: null,
-        username: null
-    };
-
-    /**
-     * Toggles the loading state for the confirmation button/loading indicator.
-     * @param {boolean} isLoading - True to show loading, false to hide.
-     */
-    const toggleLoadingState = (isLoading) => {
-        if (loadingDiv) loadingDiv.style.display = isLoading ? 'block' : 'none';
-        if (confirmResetBtn) confirmResetBtn.disabled = isLoading;
-    };
-
-
-    // Event 1: Capture user context when the confirmation modal is about to show
-    if (confirmModalEl) {
-        confirmModalEl.addEventListener('show.bs.modal', (event) => {
-            const button = event.relatedTarget;
-            userContext.id = button.getAttribute('data-user-id');
-            userContext.username = button.getAttribute('data-username');
-
-            const usernamePlaceholder = confirmModalEl.querySelector('#confirm-username-placeholder');
+            const usernamePlaceholder = confirmModal.querySelector('#confirm-username-placeholder');
             if (usernamePlaceholder) {
-                usernamePlaceholder.textContent = userContext.username;
+                usernamePlaceholder.textContent = currentUsername;
+            }
+
+            // Ensure the loading spinner is hidden and buttons are shown when the modal opens
+            const loadingSpinner = document.getElementById('reset-password-loading');
+            const footerButtons = confirmModal.querySelector('.modal-footer');
+            if (loadingSpinner && footerButtons) {
+                loadingSpinner.style.display = 'none';
+                footerButtons.style.display = 'flex';
             }
         });
     }
 
-    // Event 2: Handle the actual password reset API call
-    if (confirmResetBtn) {
-        confirmResetBtn.addEventListener('click', async () => {
-            toggleLoadingState(true);
+    // --- 2. Handle the "Reset Password" confirmation button click (AJAX) ---
+    if (confirmButton) {
+        confirmButton.addEventListener('click', function () {
+            if (!currentUserId || !currentDomain) {
+                // Should not happen if data-user-id is set on the table button and domain input is present
+                console.error("User ID or Domain missing for password reset.");
+                return;
+            }
 
-            try {
-                // Use the globally available userContext.id
-                const response = await fetch(`/users/${userContext.id}/reset-password`, {
-                    method: 'POST',
-                    headers: {
-                        // Assuming this is running in a Laravel/Blade environment
-                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-                        'Content-Type': 'application/json'
-                    }
-                });
+            // Show loading spinner and hide footer buttons to prevent double-click
+            const loadingSpinner = document.getElementById('reset-password-loading');
+            const footerButtons = confirmModal.querySelector('.modal-footer');
+            if (loadingSpinner && footerButtons) {
+                loadingSpinner.style.display = 'block';
+                footerButtons.style.display = 'none';
+            }
 
+            // Perform the AJAX request to the Laravel endpoint
+            fetch(`/users/${currentUserId}/reset-password`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                },
+                // Pass the domain context in the request body, which the backend (UserController) expects
+                body: JSON.stringify({
+                    domain: currentDomain
+                })
+            })
+            .then(response => {
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    // Check for a JSON error response before throwing
+                    return response.json().then(err => { throw new Error(err.error || 'Server error occurred.'); });
                 }
+                return response.json();
+            })
+            .then(data => {
+                if (data.new_password) {
+                    // Success: Hide confirm modal, show result modal
+                    const modalInstance = bootstrap.Modal.getInstance(confirmModal);
+                    if (modalInstance) modalInstance.hide();
 
-                const data = await response.json();
+                    const usernameSuccessPlaceholder = successModal.querySelector('#success-username-placeholder');
+                    const passwordDisplay = successModal.querySelector('#new-password-display');
+                    const copyFeedback = successModal.querySelector('#copy-feedback');
 
-                // 1. Hide confirmation modal
-                const confirmModalInstance = bootstrap.Modal.getInstance(confirmModalEl);
-                if (confirmModalInstance) confirmModalInstance.hide();
+                    if (usernameSuccessPlaceholder && passwordDisplay) {
+                        usernameSuccessPlaceholder.textContent = currentUsername;
+                        passwordDisplay.value = data.new_password;
+                    }
 
-                // 2. Populate and show success modal
-                if (successModalEl) {
-                    successModalEl.querySelector('#success-username-placeholder').textContent = userContext.username;
-                    successModalEl.querySelector('#new-password-display').value = data.new_password;
-                    new bootstrap.Modal(successModalEl).show();
+                    // Reset copy feedback display
+                    if (copyFeedback) copyFeedback.style.display = 'none';
+
+                    const successModalInstance = new bootstrap.Modal(successModal);
+                    successModalInstance.show();
+
+                } else {
+                    // This block should ideally not be reached if the backend returns the expected structure
+                    alert('Password reset failed: Unknown response format.');
                 }
-
-            } catch (error) {
-                console.error('Password Reset Failed:', error);
-                // Use a custom modal/message box instead of alert()
-                // For this simplification, we'll log, but in a real app, use a proper UI notification
-                console.warn('Failed to reset password. Please check the console for details.');
-            } finally {
-                toggleLoadingState(false);
-            }
+            })
+            .catch(error => {
+                console.error('Error during password reset:', error.message);
+                // Use a custom modal or alert to inform the user about the error
+                alert('Password reset failed. Details: ' + error.message);
+            })
+            .finally(() => {
+                // Always reset UI elements and temporary variables
+                if (loadingSpinner && footerButtons) {
+                    loadingSpinner.style.display = 'none';
+                    footerButtons.style.display = 'flex'; // Restore button visibility
+                }
+                currentUserId = null;
+                currentUsername = null;
+            });
         });
     }
 
-    // Event 3: Handle Copy to Clipboard Functionality (using modern Clipboard API if available)
-    if (copyPasswordBtn) {
-        copyPasswordBtn.addEventListener('click', async () => {
-            const passwordField = document.getElementById('new-password-display');
+    // --- 3. Handle copy to clipboard logic for the result modal ---
+    if (copyButton) {
+        copyButton.addEventListener('click', function() {
+            const passwordDisplay = document.getElementById('new-password-display');
             const feedback = document.getElementById('copy-feedback');
 
-            if (!passwordField) return;
+            // Check if execCommand is available (clipboard API might be restricted in iframes/certain contexts)
+            if (passwordDisplay && document.execCommand) {
+                passwordDisplay.select();
+                document.execCommand('copy');
 
-            try {
-                // Modern API (preferred but might be restricted in iframes/certain environments)
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(passwordField.value);
-                } else {
-                    // Fallback to legacy document.execCommand('copy')
-                    passwordField.select();
-                    document.execCommand('copy');
-                }
-
+                // Show 'Copied!' feedback
                 if (feedback) {
                     feedback.style.display = 'block';
                     setTimeout(() => {
                         feedback.style.display = 'none';
                     }, 2000);
                 }
-            } catch (err) {
-                console.error('Failed to copy password: ', err);
+            } else {
+                alert('Copying to clipboard failed or is not supported in this context.');
             }
         });
     }
-
 });
