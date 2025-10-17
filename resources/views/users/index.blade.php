@@ -1,132 +1,137 @@
+{{-- resources/views/users/index.blade.php --}}
 @extends('layouts.app')
 
-@section('title', 'KeyStone - Manage Users')
+@section('title', 'KeyStone - User Management')
 
 @section('content')
+    {{-- This is the main container for the app, visible after successful initialization. --}}
+    <div id="main-app" style="display: none;">
 
-    @if(session('success'))
-        <div class="alert alert-success">{!! session('success') !!}</div>
-    @endif
-     @if(session('info'))
-        <div class="alert alert-info">{{ session('info') }}</div>
-    @endif
+        {{-- Include your navigation bar partial --}}
+        @include('layouts.partials.nav')
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h2">User Directory</h1>
-        <input type="hidden" id="current-domain" value="{{ $selectedDomain ?? '' }}">
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#userCreateModal">
-            Create New User
-        </button>
+        <main class="container mt-4 mb-4">
+            {{-- Alert placeholder for dynamic messages from app.js --}}
+            <div id="alert-placeholder"></div>
+
+            {{-- User Management Card --}}
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h4>User Management</h4>
+                    <button id="create-user-show-modal-btn" class="btn btn-primary" disabled>Create New User</button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive mt-3">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Display Name</th>
+                                    <th>Username</th>
+                                    <th>Domain</th>
+                                    <th>Status</th>
+                                    <th>Admin</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-table-body">
+                                {{-- This table body will be populated by app.js --}}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer mt-auto py-3 bg-light border-top">
+            <div class="container text-center">
+                <span class="text-muted">&copy; {{ date('Y') }} KeyStone. All rights reserved.</span>
+            </div>
+        </footer>
     </div>
 
-    <div class="card">
-        <div class="card-header">
-             @if(isset($searchQuery) && $searchQuery)
-                Showing results for "<strong>{{ $searchQuery }}</strong>" in {{ $selectedDomain ?? '' }}
-            @else
-                All users in {{ $selectedDomain ?? '' }}
-            @endif
-        </div>
-        <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th>Display Name</th>
-                        <th>Username</th>
-                        <th>Domain</th>
-                        <th>Privileged</th>
-                        <th>Expires</th>
-                        <th>Status</th>
-                        <th class="text-center">Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($users ?? [] as $user)
-                        <tr>
-                            <td>{{ $user->getFirstAttribute('displayname') }}</td>
-                            <td>{{ $user->getFirstAttribute('samaccountname') }}</td>
-                            <td>{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? 'N/A' }}</td>
-                            <td>
-                                @if (substr($user->getFirstAttribute('samaccountname'), -2) === '-a')
-                                    <span class="badge bg-dark">Yes</span>
-                                @else
-                                    <span class="text-muted">No</span>
-                                @endif
-                            </td>
-                            <td>
-                                @if($user->accountexpires instanceof \Carbon\Carbon)
-                                    {{ $user->accountexpires->format('Y-m-d') }}
-                                @else
-                                    Never
-                                @endif
-                            </td>
-                            <td>
-                                @if ($user->isDisabled())
-                                    <span class="badge bg-danger">Disabled</span>
-                                @else
-                                    <span class="badge bg-success">Enabled</span>
-                                @endif
-                                @if ($user->getFirstAttribute('lockouttime') > 0)
-                                    <span class="badge bg-warning text-dark">Locked</span>
-                                @endif
-                            </td>
-                            <td class="text-center table-actions">
-                                <div class="d-flex justify-content-center align-items-center">
+    {{-- ------------------------------------------------------------------- --}}
+    {{--                         SECTION: Modals                               --}}
+    {{-- ------------------------------------------------------------------- --}}
 
-                                    <button type="button" class="btn btn-link p-2" title="Edit User" data-bs-toggle="modal" data-bs-target="#editUserModal-{{ $user->getConvertedGuid() }}">
-                                         <i class="bi bi-pencil-fill"></i>
-                                    </button>
-
-                                    <button type="button" class="btn btn-link p-2" title="Reset Password" data-bs-toggle="modal"
-                                        data-bs-target="#resetPasswordConfirmModal"
-                                        data-user-id="{{ $user->getConvertedGuid() }}"
-                                        data-username="{{ $user->getFirstAttribute('samaccountname') }}"
-                                        data-domain="{{ explode('@', $user->getFirstAttribute('userprincipalname'))[1] ?? '' }}"
-                                        data-dn="{{ $user->getFirstAttribute('distinguishedname') }}">
-                                        <i class="bi bi-key-fill text-secondary"></i>
-                                    </button>
-
-                                </div>
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="text-center p-5">
-                                No users found.
-                            </td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
+    {{-- MODAL: Create New User --}}
+    <div class="modal fade" id="create-user-modal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create New User</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="create-user-form" novalidate>
+                        <div class="mb-3"><label for="create-domain" class="form-label">Target Domain</label><select class="form-select" id="create-domain" required></select></div>
+                        <div class="row"><div class="col-md-6 mb-3"><label for="create-firstname" class="form-label">First Name</label><input type="text" class="form-control" id="create-firstname" required></div><div class="col-md-6 mb-3"><label for="create-lastname" class="form-label">Last Name</label><input type="text" class="form-control" id="create-lastname" required></div></div>
+                        <div class="mb-3"><label for="create-samaccountname" class="form-label">Username (Logon Name)</label><input type="text" class="form-control" id="create-samaccountname" required></div>
+                        <div class="row"><div class="col-md-6 mb-3"><label for="create-dob" class="form-label">Date of Birth</label><input type="date" class="form-control" id="create-dob"></div><div class="col-md-6 mb-3"><label for="create-mobile" class="form-label">Mobile Number</label><input type="text" class="form-control" id="create-mobile"></div></div>
+                        <div id="create-standard-groups-container" class="mb-3" style="display: none;"><label class="form-label">Standard Optional Groups</label><div id="create-standard-groups-list"></div></div>
+                        <div id="create-admin-container" class="form-check form-switch mb-3" style="display: none;"><input class="form-check-input" type="checkbox" role="switch" id="create-admin-account"><label class="form-check-label" for="create-admin-account">Create associated admin account</label></div>
+                        <div id="create-privilege-groups-container" class="mb-3" style="display: none;"><label class="form-label">Privilege Optional Groups</label><div id="create-privilege-groups-list"></div></div>
+                        <div class="alert alert-info small">A secure, random password will be generated for the new user account(s).</div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" form="create-user-form" class="btn btn-primary">Create User</button>
+                </div>
+            </div>
         </div>
     </div>
 
+    {{-- MODAL: Edit User --}}
+    <div class="modal fade" id="edit-user-modal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Edit User</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <form id="edit-user-form" novalidate>
+                        <input type="hidden" id="edit-samaccountname"><input type="hidden" id="edit-domain">
+                        <div class="mb-3"><label for="edit-username-display" class="form-label">Username</label><input type="text" class="form-control" id="edit-username-display" readonly></div>
+                        <div class="row"><div class="col-md-6 mb-3"><label for="edit-firstname" class="form-label">First Name</label><input type="text" class="form-control" id="edit-firstname" required></div><div class="col-md-6 mb-3"><label for="edit-lastname" class="form-label">Last Name</label><input type="text" class="form-control" id="edit-lastname" required></div></div>
+                        <div class="row"><div class="col-md-6 mb-3"><label for="edit-dob" class="form-label">Date of Birth</label><input type="date" class="form-control" id="edit-dob"></div><div class="col-md-6 mb-3"><label for="edit-mobile" class="form-label">Mobile Number</label><input type="text" class="form-control" id="edit-mobile"></div></div>
+                        <div id="edit-standard-groups-container" class="mb-3" style="display: none;"><label class="form-label">Standard User Optional Groups</label><div id="edit-standard-groups-list"></div></div>
+                        <div id="edit-admin-container" class="form-check form-switch mb-3" style="display: none;"><input class="form-check-input" type="checkbox" role="switch" id="edit-admin-account"><label class="form-check-label" for="edit-admin-account">Enable Administrator Access</label></div>
+                        <div id="edit-privilege-groups-container" class="mb-3" style="display: none;"><label class="form-label">Privilege User Optional Groups</label><div id="edit-privilege-groups-list"></div></div>
+                    </form>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" form="edit-user-form" class="btn btn-primary">Save Changes</button></div>
+            </div>
+        </div>
+    </div>
 
-    @if(isset($users))
-        @foreach($users as $user)
-            @include('users.edit', ['user' => $user, 'domain' => $selectedDomain, 'optionalGroups' => $optionalGroups])
-        @endforeach
-    @endif
+    {{-- MODAL: Create User Result --}}
+    <div class="modal fade" id="create-user-result-modal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">User Creation Successful</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body" id="create-user-result-body"></div>
+                <div class="modal-footer"><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button></div>
+            </div>
+        </div>
+    </div>
 
-    {{-- Modals Section --}}
-
-    {{-- Create Modal --}}
-    @include('users.modals.create')
-    {{-- Password Reset Modals --}}
-    @include('users.modals.user-pw-confirm')
-    @include('users.modals.user-pw-result')
+    {{-- MODAL: Reset Password Result --}}
+    <div class="modal fade" id="reset-password-result-modal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Password Reset Successful</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <p>Password for user <strong id="reset-pw-result-username"></strong> has been reset.</p>
+                    <div class="mb-3">
+                        <label for="reset-pw-result-new" class="form-label">New Temporary Password:</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="reset-pw-result-new" readonly>
+                            <button class="btn btn-outline-secondary" type="button" id="copy-password-btn" title="Copy to clipboard"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                    </div>
+                    <p class="form-text">Please provide this password to the user. They will be required to change it on their next login.</p>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button></div>
+            </div>
+        </div>
+    </div>
 
 @endsection
-
-@push('scripts')
-@if (session('open_modal'))
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        var myModal = new bootstrap.Modal(document.querySelector('{{ session('open_modal') }}'), {
-            keyboard: false
-        });
-        myModal.show();
-    });
-</script>
-@endif
-@endpush

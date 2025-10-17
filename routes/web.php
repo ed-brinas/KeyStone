@@ -1,19 +1,23 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\UserController;
+use App\Http\Controllers\Auth\LoginController;
 
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| These routes handle displaying the application's views.
+|
+*/
 
-// Redirect the root URL to the users index page.
+// Route to display the login form. The 'guest' middleware prevents logged-in users from seeing it.
+Route::get('login', [LoginController::class, 'showLoginForm'])->middleware('guest')->name('login');
+
+// The main application route. The 'auth' middleware protects it,
+// ensuring only authenticated users can access it.
 Route::get('/', function () {
-    return redirect()->route('users.index');
-});
+    return view('app'); // This will load resources/views/app.blade.php
+})->middleware('auth')->name('home');
 
-// User management routes
-Route::prefix('users')->name('users.')->controller(UserController::class)->group(function () {
-    Route::get('/', 'index')->name('index');
-    Route::post('/', 'store')->name('store');
-    Route::put('/{guid}', 'update')->name('update');
-    Route::post('/{guid}/reset-password', 'resetPassword')->name('resetPassword');
-    Route::get('/download-pdf/{filename}', 'downloadPdf')->name('download-pdf');
-});

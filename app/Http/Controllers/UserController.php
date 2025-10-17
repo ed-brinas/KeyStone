@@ -3,396 +3,645 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use LdapRecord\Models\ActiveDirectory\User;
-use LdapRecord\Models\ActiveDirectory\Group;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use LdapRecord\Container;
 use LdapRecord\Connection;
 use LdapRecord\LdapRecordException;
-use Illuminate\Support\Facades\Validator;
+use LdapRecord\Models\ActiveDirectory\User;
+use LdapRecord\Models\ActiveDirectory\Group;
 use LdapRecord\Models\Attributes\Password;
-use Carbon\Carbon;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Hash;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\Storage;
 
 class UserController extends Controller
 {
+    /**
+     * Provides the frontend with necessary configuration details.
+     * This includes domains and optional groups for user creation and editing.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getConfig()
+    {
+        // Use the new keystone.php configuration keys
+        return response()->json([
+            'domains' => config('keystone.adSettings.domains', []),
+            'optionalGroupsForStandard' => config('keystone.provisioning.optionalGroupsForStandardUser', []),
+            'optionalGroupsForHighPrivilege' => config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', []),
+        ]);
+    }
 
     /**
-     * Dynamically sets the default LDAP connection.
+     * Provides details about the currently authenticated user.
+     * In a real application, this would come from the authentication session.
      *
-     * @param string $domain
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getCurrentUser()
+    {
+        // Placeholder: In a real app, get this from auth()->user()
+        // TODO: Implement actual authentication and authorization check
+        return response()->json([
+            'name' => 'Admin User', // Example user
+            'isHighPrivilege' => true, // Example privilege
+        ]);
+    }
+
+    /**
+     * Replaces the {domain-components} placeholder in a string with the LDAP DC format.
+     * * @param string $string The string containing the placeholder.
+     * @param string $domain The domain to generate components from.
+     * @return string The modified string.
+     */
+    private function _replaceDomainComponents(string $string, string $domain): string
+    {
+        $domainComponents = 'dc=' . str_replace('.', ',dc=', $domain);
+        return str_replace('{domain-components}', $domainComponents, $string);
+    }
+
+    /**
+     * Dynamically sets the default LDAP connection using service account credentials.
+     * It fetches connection details from the .env file and establishes a
+     * connection to the specified domain's Active Directory servers.
+     *
+     * @param string $domain The domain to connect to.
      * @return void
+     * @throws \Exception If configuration is missing or connection fails.
      */
     private function setLdapConnection(string $domain): void
     {
-        $config = config('ldap.connections.default');
-        $config['base_dn'] = 'dc=' . str_replace('.', ',dc=', $domain);
-        $domainAdServers = config("keystone.adSettings.domain_controllers.{$domain}");
+        // Get connection details from the .env file
+        $hosts = [env('LDAP_HOST')];
+        $username = env('LDAP_USERNAME');
+        $password = env('LDAP_PASSWORD');
+        $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
 
-        if (!empty($domainAdServers)) {
-            $config['hosts'] = $domainAdServers;
+        if (empty($hosts[0]) || empty($username) || empty($password)) {
+            throw new \Exception("AD connection details (LDAP_HOST, LDAP_USERNAME, LDAP_PASSWORD) are missing in your .env file.");
         }
 
-        $connection = new Connection($config);
+        $connection = new Connection([
+            'hosts' => $hosts,
+            'base_dn' => $baseDn,
+            'username' => $username,
+            'password' => $password,
+            'port' => env('LDAP_PORT', 389),
+            'use_ssl' => env('LDAP_SSL', false),
+            'use_tls' => env('LDAP_TLS', false),
+            'version' => 3,
+            'timeout' => env('LDAP_TIMEOUT', 5),
+            'options' => [
+                // Set TLS options based on .env for allowing self-signed certs etc.
+                // LDAPTLS_REQCERT=never is equivalent to LDAP_OPT_X_TLS_NEVER
+                LDAP_OPT_X_TLS_REQUIRE_CERT => env('LDAP_TLS_INSECURE', false) ? LDAP_OPT_X_TLS_NEVER : LDAP_OPT_X_TLS_DEMAND,
+            ]
+        ]);
 
-        Container::addConnection($connection, $domain);
-
-        Container::setDefaultConnection($domain);
+        try {
+            $connection->connect();
+            Container::addConnection($connection, $domain);
+            Container::setDefaultConnection($domain);
+            Log::info("Successfully connected to AD for domain {$domain}");
+        } catch (LdapRecordException $e) {
+            Log::error("Failed to connect to any AD server for domain {$domain}: " . $e->getMessage());
+            throw new \Exception("Unable to connect to the configured AD server for domain {$domain}.");
+        }
     }
 
     /**
-     * Generate a strong, random password.
+     * Retrieves and lists users from Active Directory based on filter criteria.
+     * Filters include domain, name, account status, and whether a user has an admin account.
      *
-     * @return string
-     */
-    private function generatePassword(): string
-    {
-        // Password: 8 characters minimum, mixed case, numbers, special characters
-        // Laravel's Str::random can be used, but it must be supplemented
-        // to guarantee the required complexity for AD.
-        $upper = 'ABCDEFGHIJKLMNPQRSTUVWXYZ';
-        $lower = 'abcdefghijklmnpqrstuvwxyz';
-        $number = '123456789';
-        $special = '!@#$%^&*()_+=-';
-
-        $chars = $upper . $lower . $number . $special;
-        $password = '';
-
-        // Guarantee at least one of each type
-        $password .= $upper[random_int(0, strlen($upper) - 1)];
-        $password .= $lower[random_int(0, strlen($lower) - 1)];
-        $password .= $number[random_int(0, strlen($number) - 1)];
-        $password .= $special[random_int(0, strlen($special) - 1)];
-
-        // Fill the rest up to 12 characters (for better security)
-        $minLength = 12;
-        for ($i = 0; $i < $minLength - 4; $i++) {
-            $password .= $chars[random_int(0, strlen($chars) - 1)];
-        }
-
-        // Shuffle the string to prevent predictable patterns
-        return str_shuffle($password);
-    }
-
-    /**
-     * Display a listing of the resource.
-     *
-     * @param Request $request
-     * @return \Illuminate\View\View
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse A list of users or an error message.
      */
     public function index(Request $request)
     {
-        $domains = config('keystone.adSettings.domains', []);
-        $selectedDomain = $request->input('domain', $domains[0] ?? null);
-        $searchQuery = $request->input('search_query', '');
-        $users = [];
-        $error = null;
+        $validator = Validator::make($request->all(), [
+            'domain' => 'required|string',
+            'nameFilter' => 'nullable|string',
+            'statusFilter' => 'nullable|boolean',
+            'hasAdminAccount' => 'nullable|boolean',
+        ]);
 
-        if ($selectedDomain) {
-            try {
-                $this->setLdapConnection($selectedDomain);
-
-                $searchOus = config('keystone.provisioning.searchBaseOus', []);
-                $query = User::query();
-
-                if (!empty($searchQuery)) {
-                    $query->where(function ($q) use ($searchQuery) {
-                        $q->where('cn', 'contains', $searchQuery)
-                          ->orWhere('samaccountname', 'contains', 'like', '%' . $searchQuery . '%')
-                          ->orWhere('mail', 'contains', $searchQuery);
-                    });
-                }
-
-                $usersInOus = [];
-                foreach ($searchOus as $ou) {
-                    $domainComponents = 'dc=' . str_replace('.', ',dc=', $selectedDomain);
-                    $fullOu = str_replace('{domain-components}', $domainComponents, $ou);
-
-                    $ouQuery = clone $query;
-                    $results = $ouQuery->in($fullOu)->get();
-                    if ($results) {
-                       $usersInOus = array_merge($usersInOus, $results->all());
-                    }
-                }
-
-                $users = $usersInOus;
-
-            } catch (LdapRecordException $e) {
-                $error = "Could not connect or search in LDAP directory for domain '{$selectedDomain}'. Please check the configuration. Error: " . $e->getMessage();
-            }
-        } else {
-            $error = "No domains configured. Please check your keystone.php configuration file.";
+        if ($validator->fails()) {
+            return response()->json(['error' => $validator->errors()], 400);
         }
 
-        $provisioningOus = config('keystone.provisioning.provisioningOus', []);
-        $optionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
-        return view('users.index', compact('users', 'domains', 'selectedDomain', 'searchQuery', 'error', 'provisioningOus', 'optionalGroups'));
+        try {
+            $this->setLdapConnection($request->domain);
+            $searchOus = config('keystone.provisioning.searchBaseOus', []);
+            $allUsers = [];
+
+            foreach ($searchOus as $ou) {
+                $fullOu = $this->_replaceDomainComponents($ou, $request->domain);
+                $query = User::query()->in($fullOu);
+
+                if ($request->filled('nameFilter')) {
+                    $query->where('cn', 'contains', $request->nameFilter);
+                }
+
+                if ($request->filled('statusFilter')) {
+                    // useraccountcontrol flags: 512 = enabled, 514 = disabled
+                    $query->where('useraccountcontrol', '=', $request->boolean('statusFilter') ? 512 : 514);
+                }
+
+                $users = $query->get();
+
+                foreach ($users as $user) {
+                    $adminExists = $this->_checkIfAdminAccountExists($user->samaccountname[0]);
+                    if ($request->filled('hasAdminAccount') && $request->boolean('hasAdminAccount') !== $adminExists) {
+                        continue;
+                    }
+
+                    $allUsers[] = [
+                        'samAccountName' => $user->samaccountname[0],
+                        'displayName' => $user->displayname[0] ?? null,
+                        'isEnabled' => !$user->isDisabled(),
+                        'hasAdminAccount' => $adminExists,
+                    ];
+                }
+            }
+
+            return response()->json(collect($allUsers)->sortBy('displayName')->values()->all());
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to list users: ' . $e->getMessage()], 500);
+        }
     }
 
     /**
-     * Show the form for creating a a new resource.
-     */
-    public function create()
-    {
-        $domains = config('keystone.adSettings.domains', []);
-        $selectedDomain = $domains[0] ?? null;
-        $optionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
-        return view('users.index', compact('domains', 'selectedDomain', 'optionalGroups'));
-    }
-
-    /**
-     * Store a newly created resource in storage.
+     * Retrieves detailed information for a single user from Active Directory.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request The incoming HTTP request containing domain and samAccountName.
+     * @return \Illuminate\Http\JsonResponse The user's details or an error message.
+     */
+    public function show(Request $request)
+    {
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+
+            if (!$user) {
+                return response()->json(['error' => 'User not found.'], 404);
+            }
+
+            $userDetails = [
+                'samAccountName' => $user->samaccountname[0],
+                'firstName' => $user->givenname[0] ?? null,
+                'lastName' => $user->sn[0] ?? null,
+                'displayName' => $user->displayname[0] ?? null,
+                'userPrincipalName' => $user->userprincipalname[0] ?? null,
+                'emailAddress' => $user->mail[0] ?? null,
+                'dateOfBirth' => $user->getFirstAttribute('extensionAttribute1'),
+                'mobileNumber' => $user->getFirstAttribute('mobile'),
+                'isEnabled' => !$user->isDisabled(),
+                'isLockedOut' => $user->isLockedout(),
+                'memberOf' => $user->groups()->get()->pluck('cn')->flatten()->toArray(),
+                'hasAdminAccount' => $this->_checkIfAdminAccountExists($user->samaccountname[0]),
+            ];
+
+            return response()->json($userDetails);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to get user details: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Creates a new user in Active Directory with the provided details.
+     * Can also create a corresponding admin account if requested.
+     *
+     * @param Request $request The incoming HTTP request with user data.
+     * @return \Illuminate\Http\JsonResponse The new user's account name and initial password.
      */
     public function store(Request $request)
     {
-
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:50',
-            'last_name' => 'required|string|max:50',
-            'display_name' => 'required|string|max:100',
-            'date_of_birth' => 'required|date',
-            'mobile_number' => ['required', 'string', 'max:20', 'regex:/^0\d+/'],
             'domain' => 'required|string',
-            'account_expires' => 'nullable|date|after:today',
-            'groups' => 'nullable|array'
-        ], [
-            'mobile_number.regex' => 'The mobile number must start with the digit 0.'
+            'samAccountName' => 'required|string|max:20',
+            'firstName' => 'required|string|max:50',
+            'lastName' => 'required|string|max:50',
+            'dateOfBirth' => 'nullable|string',
+            'mobileNumber' => 'nullable|string',
+            'optionalGroups' => 'nullable|array',
+            'privilegeGroups' => 'nullable|array',
+            'createAdminAccount' => 'boolean',
         ]);
 
-
-
-        if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#userCreateModal');
-        }
-
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
 
         try {
             $this->setLdapConnection($request->domain);
 
-            $firstName = $request->first_name;
-            $lastName = $request->last_name;
-            $displayName = $request->display_name;
-            $samAccountName = strtolower(substr($firstName, 0, 1) . '.' . $lastName);
-
-            if (User::where('samaccountname', '=', $samAccountName)->exists()) {
-
-                return redirect()->back()->with('error', 'A user with that username already exists.')->withInput()->with('open_modal', '#userCreateModal');
-
+            if (User::findBy('samaccountname', $request->samAccountName)) {
+                return response()->json(['error' => 'User already exists.'], 409);
             }
 
             $user = new User();
+            $displayName = $request->firstName . ' ' . $request->lastName;
+            $defaultOu = config('keystone.provisioning.ouStandardUser');
+            $fullOu = $this->_replaceDomainComponents($defaultOu, $request->domain);
 
-            $ouStandardUser = config('keystone.provisioning.ouStandardUser');
-            $domainComponents = 'dc=' . str_replace('.', ',dc=', $request->domain);
-            $fullOu = str_replace('{domain-components}', $domainComponents, $ouStandardUser);
-
-            $user->setDn("cn=$displayName," . $fullOu);
-
-            $user->givenname = $firstName;
-            $user->sn = $lastName;
-            $user->cn = $displayName;
+            $user->setDn("cn={$displayName}," . $fullOu);
+            $user->samaccountname = $request->samAccountName;
+            $user->givenname = $request->firstName;
+            $user->sn = $request->lastName;
             $user->displayname = $displayName;
-            $user->samaccountname = $samAccountName;
-            $user->userprincipalname = $samAccountName . '@' . $request->domain;
+            $user->userprincipalname = $request->samAccountName . '@' . $request->domain;
 
-            $password = $this->generatePassword();
-            $user->unicodepwd = Password::encode($password);
+            if($request->filled('dateOfBirth')) $user->extensionAttribute1 = $request->dateOfBirth;
+            if($request->filled('mobileNumber')) $user->mobile = $request->mobileNumber;
 
-            $user->mobile = $request->mobile_number;
-            $user->description = $request->date_of_birth;
-
-            if ($request->filled('account_expires')) {
-                $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
-            } else {
-                $user->accountexpires = 0; // Never expires
-            }
-
-            $user->useraccountcontrol = 512;
-
+            $initialPassword = $this->_generatePassword();
+            $user->unicodepwd = Password::encode($initialPassword);
+            $user->useraccountcontrol = 512; // Enabled account
+            $user->save();
+            $user->pwdlastset = 0; // Force password change on next logon
             $user->save();
 
-            if ($request->has('groups')) {
-                foreach ($request->groups as $groupName) {
-                    $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
-                    if ($group) {
-                        $user->groups()->attach($group);
-                    }
+            // Add to optional groups
+            if ($request->filled('optionalGroups')) {
+                foreach($request->optionalGroups as $groupDn) {
+                    $this->_addUserToGroup($user->samaccountname[0], $this->_replaceDomainComponents($groupDn, $request->domain));
                 }
             }
 
-            $user->pwdlastset = -1;
-            $user->save();
+            $response = [
+                'samAccountName' => $user->samaccountname[0],
+                'initialPassword' => $initialPassword,
+            ];
 
-            $pdf = Pdf::loadView('users.pdf', [
-                'domain' => $request->domain,
-                'displayName' => $displayName,
-                'username' => $samAccountName,
-                'password' => $password
-            ]);
+            // Create Admin Account if requested
+            if ($request->createAdminAccount) {
+                 // TODO: Add privilege check similar to C#'s IsUserHighPrivilege
+                $adminResponse = $this->_createAdminAccount($request);
+                $response['adminAccountName'] = $adminResponse['samAccountName'];
+                $response['adminInitialPassword'] = $adminResponse['initialPassword'];
+            }
 
-            $fileName = 'user_credentials_' . $samAccountName . '.pdf';
-            Storage::put('private/' . $fileName, $pdf->output());
-
-            $successMessage = "User created successfully. Temporary Password: <strong>$password</strong>";
-            return redirect()->route('users.index')->with('success', $successMessage)->with('pdf_download_link', route('users.download-pdf', $fileName));
+            return response()->json($response, 201);
 
         } catch (\Exception $e) {
-
-            return redirect()->back()->with('error', 'Failed to create user: ' . $e->getMessage())->withInput()->with('open_modal', '#userCreateModal');
-
+            return response()->json(['error' => 'Failed to create user: ' . $e->getMessage()], 500);
         }
     }
 
     /**
-     * Update the specified resource in storage.
+     * Updates an existing user's attributes, group memberships, and admin account status.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  string  $guid
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request The incoming HTTP request with update data.
+     * @return \Illuminate\Http\JsonResponse A success message or an error.
      */
-    public function update(Request $request, $guid)
+    public function update(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:50',
-            'last_name' => 'required|string|max:50',
-            'date_of_birth' => 'required|date',
-            'mobile_number' => 'required|string|max:20',
             'domain' => 'required|string',
-            'account_expires' => 'nullable|date|after:today',
-            'password' => 'nullable|string|min:8|confirmed',
-            'groups' => 'nullable|array'
+            'samAccountName' => 'required|string',
+            'dateOfBirth' => 'nullable|string',
+            'mobileNumber' => 'nullable|string',
+            'optionalGroups' => 'nullable|array',
+            'hasAdminAccount' => 'nullable|boolean',
         ]);
-
-
-        if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput()->with('open_modal', '#editUserModal-' . $guid);
-        }
-
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
 
         try {
             $this->setLdapConnection($request->domain);
-            $user = User::findOrFail($guid);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+            if (!$user) return response()->json(['error' => 'User not found.'], 404);
 
-            $user->givenname = $request->first_name;
-            $user->sn = $request->last_name;
-            $user->displayname = $request->first_name . ' ' . $request->last_name;
-
-            $user->mobile = $request->mobile_number;
-            $user->description = $request->date_of_birth;
-
-            if ($request->filled('account_expires')) {
-                $user->accountexpires = Carbon::parse($request->account_expires)->endOfDay();
-            } else {
-                $user->accountexpires = 0; // Never expires
-            }
-
-            if ($request->filled('password')) {
-                $user->unicodepwd = Password::encode($request->password);
-            }
-
+            // Update attributes
+            $user->extensionAttribute1 = $request->dateOfBirth ?? null;
+            $user->mobile = $request->mobileNumber ?? null;
             $user->save();
 
-            $domainComponents = 'dc=' . str_replace('.', ',dc=', $request->domain);
-            $userGroups = $user->groups()->get()->pluck('cn')->flatten()->toArray();
-            $submittedGroups = $request->input('groups', []);
+            // Update group membership
+            $allOptionalGroups = array_merge(
+                config('keystone.provisioning.optionalGroupsForStandardUser', []),
+                config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', [])
+            );
+            $this->_updateGroupMembership($user, $request->optionalGroups ?? [], $allOptionalGroups);
 
-            $groupsToAdd = array_diff($submittedGroups, $userGroups);
-            foreach ($groupsToAdd as $groupName) {
-                $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
-                if($group) $user->groups()->attach($group);
+            // Handle admin account
+            if ($request->filled('hasAdminAccount')) {
+                // TODO: Add privilege check
+                $adminExists = $this->_checkIfAdminAccountExists($user->samaccountname[0]);
+                if ($request->hasAdminAccount && !$adminExists) {
+                    $createReq = new Request([
+                        'samAccountName' => $user->samaccountname[0],
+                        'domain' => $request->domain,
+                        'firstName' => $user->givenname[0],
+                        'lastName' => $user->sn[0],
+                        // Pass privilege groups from the original request if available
+                        'privilegeGroups' => $request->input('privilegeGroups', [])
+                    ]);
+                    $this->_createAdminAccount($createReq);
+                } else if (!$request->hasAdminAccount && $adminExists) {
+                    $this->_disableAdminAccount($user->samaccountname[0] . '-a');
+                }
             }
 
-            $groupsToRemove = array_diff($userGroups, $submittedGroups);
-             foreach ($groupsToRemove as $groupName) {
-                $group = Group::find("cn=$groupName,ou=Groups," . $domainComponents);
-                if($group) $user->groups()->detach($group);
-            }
+            return response()->json(['success' => 'User updated successfully.']);
 
-            return redirect()->route('users.index')->with('success', 'User updated successfully.');
         } catch (\Exception $e) {
-
-            return redirect()->back()->with('error', 'Failed to update user: ' . $e->getMessage())->with('open_modal', '#editUserModal-' . $guid);
-
+            return response()->json(['error' => 'Failed to update user: ' . $e->getMessage()], 500);
         }
     }
 
     /**
-     * Reset a user's password and unlock the account if locked.
+     * Resets a standard user's password and forces a change on next logon.
      *
-     * @param Request $request
-     * @param string $guid The GUID of the user.
-     * @return \Illuminate\Http\JsonResponse
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse The new password or an error message.
      */
-    public function resetPassword(Request $request, string $guid) // <-- MODIFIED signature
+    public function resetPassword(Request $request)
     {
-        // Get the domain from the request body (sent by the AJAX call)
-        $domain = $request->input('domain');
-        $dn = $request->input('dn');
-
-        if (empty($domain)) {
-            Log::error("Password reset failed for GUID {$guid}: Domain context missing in request.");
-            // Return a 400 error if the domain is missing
-            return response()->json(['error' => 'Domain context is required for password reset.'], 400);
-        }
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
 
         try {
-            // Set the correct LDAP connection (this also defines the Base DN)
-            $this->setLdapConnection($domain);
+            $this->setLdapConnection($request->domain);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+            if (!$user) return response()->json(['error' => 'User not found.'], 404);
 
-            // Find the user by their distinguished name (DN) or another attribute
-            $user = User::find($dn);
-
-            // Generate a new secure password (8+ chars, mixed complexity)
-            $newPassword = $this->generatePassword();
-
-            // Set the new password
+            $newPassword = $this->_generatePassword();
             $user->unicodepwd = Password::encode($newPassword);
-
-            // Unlock account (by setting lockoutTime to 0)
-            $user->lockouttime = 0;
-
-            // Force password change on next logon (pwdLastSet = 0)
-            $user->pwdlastset = 0;
-
+            $user->pwdlastset = 0; // Expire password
             $user->save();
 
-            // Log the action for auditing
-            Log::info("Password reset successful for user: {$user->getFirstAttribute('samaccountname')} in domain {$domain}");
-            /*
-             * TODO: Implement AuditLog model and uncomment this section:
-             * AuditLog::create([
-             * 'admin'        => auth()->user()->username ?? 'SYSTEM',
-             * 'action'       => 'Reset Password',
-             * 'target_user'  => $user->getFirstAttribute('samaccountname'),
-             * 'status'       => 'Success',
-             * 'ip_address'   => request()->ip()
-             * ]);
-             */
-
-            // Return the newly generated password to the frontend
-            return response()->json(['new_password' => $newPassword]);
-        } catch (LdapRecordException $e) {
-            // Changed the log message to include the domain for better debugging
-            Log::error("Password reset failed for GUID {$guid} in domain {$domain}: " . $e->getMessage());
-            return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
+            return response()->json(['newPassword' => $newPassword]);
         } catch (\Exception $e) {
-            // FIX: Return the actual error message to the frontend for better debugging
-            Log::error("General error during password reset for GUID {$guid} in domain {$domain}: " . $e->getMessage());
             return response()->json(['error' => 'Failed to reset password: ' . $e->getMessage()], 500);
         }
     }
 
     /**
-    * Download the generated credentials PDF.
-    */
-    public function downloadPdf($filename)
+     * Resets an admin account's password. Requires authorization.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse The new password or an error message.
+     */
+    public function resetAdminPassword(Request $request)
     {
-        return Storage::download('private/' . $filename);
+        // TODO: Add high privilege check
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $adminSam = $request->samAccountName . '-a';
+            $adminUser = User::findBy('samaccountname', $adminSam);
+            if (!$adminUser) return response()->json(['error' => 'Admin account not found.'], 404);
+
+            $newPassword = $this->_generatePassword();
+            $adminUser->unicodepwd = Password::encode($newPassword);
+            $adminUser->pwdlastset = 0; // Expire password
+            $adminUser->save();
+
+            return response()->json(['newPassword' => $newPassword]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to reset admin password: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Unlocks a user's account if it is locked out.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse A success message or an error.
+     */
+    public function unlockAccount(Request $request)
+    {
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+            if (!$user) return response()->json(['error' => 'User not found.'], 404);
+
+            if ($user->isLockedout()) {
+                $user->lockouttime = 0;
+                $user->save();
+            }
+            return response()->json(['success' => 'Account unlocked.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to unlock account: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Disables a user's account in Active Directory.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse A success message or an error.
+     */
+    public function disableAccount(Request $request)
+    {
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+            if (!$user) return response()->json(['error' => 'User not found.'], 404);
+
+            $user->useraccountcontrol = 514; // Set 'disabled' flag
+            $user->save();
+
+            return response()->json(['success' => 'Account disabled.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to disable account: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Enables a user's account in Active Directory.
+     *
+     * @param Request $request The incoming HTTP request.
+     * @return \Illuminate\Http\JsonResponse A success message or an error.
+     */
+    public function enableAccount(Request $request)
+    {
+        $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
+        if ($validator->fails()) return response()->json(['error' => $validator->errors()], 400);
+
+        try {
+            $this->setLdapConnection($request->domain);
+            $user = User::findBy('samaccountname', $request->samAccountName);
+            if (!$user) return response()->json(['error' => 'User not found.'], 404);
+
+            $user->useraccountcontrol = 512; // Unset 'disabled' flag
+            $user->save();
+
+            return response()->json(['success' => 'Account enabled.']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to enable account: ' . $e->getMessage()], 500);
+        }
+    }
+
+    // --- Private Helper Methods ---
+
+    /**
+     * Checks if a corresponding admin account exists for a given base account name.
+     *
+     * @param string $baseSamAccountName The base user's samAccountName.
+     * @return bool True if an admin account (e.g., 'user-a') exists.
+     */
+    private function _checkIfAdminAccountExists(string $baseSamAccountName): bool
+    {
+        return User::findBy('samaccountname', $baseSamAccountName . '-a') !== null;
+    }
+
+    /**
+     * Creates and configures a privileged admin account.
+     *
+     * @param Request $baseRequest The request data from the original user creation.
+     * @return array The new admin account name and its initial password.
+     */
+    private function _createAdminAccount(Request $baseRequest): array
+    {
+        $adminSam = $baseRequest->samAccountName . '-a';
+
+        $adminUser = new User();
+        $displayName = $baseRequest->firstName . ' ' . $baseRequest->lastName . ' (Admin)';
+        $adminOu = config('keystone.provisioning.ouPrivilegeUser');
+        $fullAdminOu = $this->_replaceDomainComponents($adminOu, $baseRequest->domain);
+
+        $adminUser->setDn("cn={$displayName}," . $fullAdminOu);
+        $adminUser->samaccountname = $adminSam;
+        $adminUser->displayname = $displayName;
+        $adminUser->userprincipalname = "{$adminSam}@{$baseRequest->domain}";
+
+        $adminPassword = $this->_generatePassword();
+        $adminUser->unicodepwd = Password::encode($adminPassword);
+        $adminUser->useraccountcontrol = 512;
+        $adminUser->save();
+        $adminUser->pwdlastset = 0;
+        $adminUser->save();
+
+        if ($baseRequest->filled('privilegeGroups')) {
+            foreach($baseRequest->privilegeGroups as $groupDn) {
+                $this->_addUserToGroup($adminSam, $this->_replaceDomainComponents($groupDn, $baseRequest->domain));
+            }
+        }
+
+        $domainUsersDn = $this->_replaceDomainComponents('CN=Domain Users,CN=Users,{domain-components}', $baseRequest->domain);
+        $this->_removeUserFromGroup($adminSam, $domainUsersDn);
+
+        return ['samAccountName' => $adminSam, 'initialPassword' => $adminPassword];
+    }
+
+    /**
+     * Disables a specified admin account.
+     *
+     * @param string $adminSam The samAccountName of the admin to disable.
+     * @return void
+     */
+    private function _disableAdminAccount(string $adminSam): void
+    {
+        $adminUser = User::findBy('samaccountname', $adminSam);
+        if($adminUser) {
+            $adminUser->useraccountcontrol = 514;
+            $adminUser->save();
+        }
+    }
+
+    /**
+     * Adds a user to a specified Active Directory group by its distinguished name.
+     *
+     * @param string $userName The user's samAccountName.
+     * @param string $groupDn The group's distinguishedName.
+     * @return void
+     */
+    private function _addUserToGroup(string $userName, string $groupDn): void
+    {
+        try {
+            $user = User::findBy('samaccountname', $userName);
+            $group = Group::find($groupDn);
+            if ($user && $group && !$user->groups()->exists($group)) {
+                $user->groups()->attach($group);
+            }
+        } catch (\Exception $e) {
+            Log::error("Failed to add user {$userName} to group {$groupDn}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Removes a user from a specified Active Directory group by its distinguished name.
+     *
+     * @param string $userName The user's samAccountName.
+     * @param string $groupDn The group's distinguishedName.
+     * @return void
+     */
+    private function _removeUserFromGroup(string $userName, string $groupDn): void
+    {
+        try {
+            $user = User::findBy('samaccountname', $userName);
+            $group = Group::find($groupDn);
+            if ($user && $group && $user->groups()->exists($group)) {
+                $user->groups()->detach($group);
+            }
+        } catch (\Exception $e) {
+            Log::error("Failed to remove user {$userName} from group {$groupDn}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Synchronizes a user's group memberships based on a requested list of groups.
+     *
+     * @param User $user The user model instance.
+     * @param array $requestedGroups The desired list of group distinguished names.
+     * @param array $manageableGroups The list of all manageable group distinguished names.
+     * @return void
+     */
+    private function _updateGroupMembership(User $user, array $requestedGroups, array $manageableGroups): void
+    {
+        $domain = explode('@', $user->userprincipalname[0])[1];
+
+        $manageableGroupsDn = array_map(function($group) use ($domain) {
+            return $this->_replaceDomainComponents($group, $domain);
+        }, $manageableGroups);
+
+        $currentGroupsDn = $user->groups()
+            ->get()
+            ->pluck('dn')
+            ->flatten()
+            ->filter(fn($dn) => in_array($dn, $manageableGroupsDn, true))
+            ->toArray();
+
+        $groupsToAdd = array_diff($requestedGroups, $currentGroupsDn);
+        $groupsToRemove = array_diff($currentGroupsDn, $requestedGroups);
+
+        foreach($groupsToAdd as $groupDn) $this->_addUserToGroup($user->samaccountname[0], $groupDn);
+        foreach($groupsToRemove as $groupDn) $this->_removeUserFromGroup($user->samaccountname[0], $groupDn);
+    }
+
+    /**
+     * Generates a random, complex password suitable for Active Directory.
+     *
+     * @return string The generated password.
+     */
+    private function _generatePassword(): string
+    {
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $lower = 'abcdefghijkmnpqrstuvwxyz';
+        $number = '23456789';
+        $special = '*$-+?_&=!%{}/';
+
+        $password = Str::random(1) . $upper[random_int(0, strlen($upper) - 1)] .
+                    Str::random(1) . $lower[random_int(0, strlen($lower) - 1)] .
+                    Str::random(1) . $number[random_int(0, strlen($number) - 1)] .
+                    Str::random(1) . $special[random_int(0, strlen($special) - 1)];
+
+        $allChars = $upper . $lower . $number . $special;
+        // Ensure password is at least 12 characters long for complexity
+        $password .= Str::random(8);
+
+        return str_shuffle($password);
     }
 }
+
