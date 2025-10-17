@@ -14,11 +14,26 @@ use LdapRecord\LdapRecordException;
 class AuthController extends Controller
 {
     /**
-     * Handle a login request to the application.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
+    * @OA\Post(
+    * path="/api/login",
+    * summary="Authenticate user and generate token",
+    * description="Validates user credentials and returns an access token upon successful authentication.",
+    * tags={"Authentication"},
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(
+    * required={"domain", "username", "password"},
+    * @OA\Property(property="domain", type="string", example="example.com"),
+    * @OA\Property(property="username", type="string", example="jdoe"),
+    * @OA\Property(property="password", type="string", example="password123")
+    * )
+    * ),
+    * @OA\Response(response=200, description="Login successful, token returned"),
+    * @OA\Response(response=401, description="Invalid credentials"),
+    * @OA\Response(response=422, description="Validation error"),
+    * @OA\Response(response=500, description="Server error")
+    * )
+    */
     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -79,10 +94,16 @@ class AuthController extends Controller
     }
 
     /**
-     * Get the authenticated User.
-     *
-     * @return \Illuminate\Http\JsonResponse
-     */
+    * @OA\Get(
+    * path="/api/me",
+    * summary="Get authenticated user's information",
+    * description="Returns information about the currently authenticated user.",
+    * tags={"Authentication"},
+    * security={{"bearerAuth":{}}},
+    * @OA\Response(response=200, description="Authenticated user info returned"),
+    * @OA\Response(response=401, description="User not authenticated")
+    * )
+    */
     public function me()
     {
         if (!Auth::check()) {
@@ -110,11 +131,17 @@ class AuthController extends Controller
     }
 
     /**
-     * Log the user out of the application.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
+    * @OA\Post(
+    * path="/api/logout",
+    * summary="Logout authenticated user",
+    * description="Invalidates the user's current JWT token and logs them out of the session.",
+    * tags={"Authentication"},
+    * security={{"bearerAuth":{}}},
+    * @OA\Response(response=200, description="Logout successful"),
+    * @OA\Response(response=401, description="User not authenticated"),
+    * @OA\Response(response=500, description="Server error")
+    * )
+    */
     public function logout(Request $request)
     {
         Auth::logout();

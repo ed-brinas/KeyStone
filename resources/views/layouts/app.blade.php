@@ -27,8 +27,8 @@
     {{-- The main content (either login page or user dashboard) is injected here --}}
     @yield('content')
 
-    <script src="{{ asset('js/app.js') }}"></script>
     <script src="{{ asset('js/bootstrap.min.js') }}"></script>
+    <script src="{{ asset('js/app.js') }}" defer></script>
     @stack('scripts')
 </body>
 </html>

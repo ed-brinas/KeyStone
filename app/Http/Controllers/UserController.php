@@ -13,14 +13,18 @@ use LdapRecord\Models\ActiveDirectory\Group;
 use LdapRecord\Models\Attributes\Password;
 use Illuminate\Support\Str;
 
+
 class UserController extends Controller
 {
     /**
-     * Provides the frontend with necessary configuration details.
-     * This includes domains and optional groups for user creation and editing.
-     *
-     * @return \Illuminate\Http\JsonResponse
-     */
+    * @OA\Get(
+    * path="/api/config",
+    * summary="Get configuration details",
+    * description="Provides domain and optional group configuration details used for user management.",
+    * tags={"Users"},
+    * @OA\Response(response=200, description="Configuration retrieved successfully")
+    * )
+    */
     public function getConfig()
     {
         // Use the new keystone.php configuration keys
@@ -32,11 +36,14 @@ class UserController extends Controller
     }
 
     /**
-     * Provides details about the currently authenticated user.
-     * In a real application, this would come from the authentication session.
-     *
-     * @return \Illuminate\Http\JsonResponse
-     */
+    * @OA\Get(
+    * path="/api/current-user",
+    * summary="Get current authenticated user",
+    * description="Returns details of the currently authenticated user (placeholder implementation).",
+    * tags={"Users"},
+    * @OA\Response(response=200, description="Authenticated user details returned successfully")
+    * )
+    */
     public function getCurrentUser()
     {
         // Placeholder: In a real app, get this from auth()->user()
@@ -48,73 +55,20 @@ class UserController extends Controller
     }
 
     /**
-     * Replaces the {domain-components} placeholder in a string with the LDAP DC format.
-     * * @param string $string The string containing the placeholder.
-     * @param string $domain The domain to generate components from.
-     * @return string The modified string.
-     */
-    private function _replaceDomainComponents(string $string, string $domain): string
-    {
-        $domainComponents = 'dc=' . str_replace('.', ',dc=', $domain);
-        return str_replace('{domain-components}', $domainComponents, $string);
-    }
-
-    /**
-     * Dynamically sets the default LDAP connection using service account credentials.
-     * It fetches connection details from the .env file and establishes a
-     * connection to the specified domain's Active Directory servers.
-     *
-     * @param string $domain The domain to connect to.
-     * @return void
-     * @throws \Exception If configuration is missing or connection fails.
-     */
-    private function setLdapConnection(string $domain): void
-    {
-        // Get connection details from the .env file
-        $hosts = [env('LDAP_HOST')];
-        $username = env('LDAP_USERNAME');
-        $password = env('LDAP_PASSWORD');
-        $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
-
-        if (empty($hosts[0]) || empty($username) || empty($password)) {
-            throw new \Exception("AD connection details (LDAP_HOST, LDAP_USERNAME, LDAP_PASSWORD) are missing in your .env file.");
-        }
-
-        $connection = new Connection([
-            'hosts' => $hosts,
-            'base_dn' => $baseDn,
-            'username' => $username,
-            'password' => $password,
-            'port' => env('LDAP_PORT', 389),
-            'use_ssl' => env('LDAP_SSL', false),
-            'use_tls' => env('LDAP_TLS', false),
-            'version' => 3,
-            'timeout' => env('LDAP_TIMEOUT', 5),
-            'options' => [
-                // Set TLS options based on .env for allowing self-signed certs etc.
-                // LDAPTLS_REQCERT=never is equivalent to LDAP_OPT_X_TLS_NEVER
-                LDAP_OPT_X_TLS_REQUIRE_CERT => env('LDAP_TLS_INSECURE', false) ? LDAP_OPT_X_TLS_NEVER : LDAP_OPT_X_TLS_DEMAND,
-            ]
-        ]);
-
-        try {
-            $connection->connect();
-            Container::addConnection($connection, $domain);
-            Container::setDefaultConnection($domain);
-            Log::info("Successfully connected to AD for domain {$domain}");
-        } catch (LdapRecordException $e) {
-            Log::error("Failed to connect to any AD server for domain {$domain}: " . $e->getMessage());
-            throw new \Exception("Unable to connect to the configured AD server for domain {$domain}.");
-        }
-    }
-
-    /**
-     * Retrieves and lists users from Active Directory based on filter criteria.
-     * Filters include domain, name, account status, and whether a user has an admin account.
-     *
-     * @param Request $request The incoming HTTP request.
-     * @return \Illuminate\Http\JsonResponse A list of users or an error message.
-     */
+    * @OA\Get(
+    * path="/api/users",
+    * summary="List Active Directory users",
+    * description="Retrieves users filtered by domain, name, account status, and admin account existence.",
+    * tags={"Users"},
+    * @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string")),
+    * @OA\Parameter(name="nameFilter", in="query", required=false, @OA\Schema(type="string")),
+    * @OA\Parameter(name="statusFilter", in="query", required=false, @OA\Schema(type="boolean")),
+    * @OA\Parameter(name="hasAdminAccount", in="query", required=false, @OA\Schema(type="boolean")),
+    * @OA\Response(response=200, description="List of users returned successfully"),
+    * @OA\Response(response=400, description="Validation error"),
+    * @OA\Response(response=500, description="Server error")
+    * )
+    */
     public function index(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -171,11 +125,19 @@ class UserController extends Controller
     }
 
     /**
-     * Retrieves detailed information for a single user from Active Directory.
-     *
-     * @param Request $request The incoming HTTP request containing domain and samAccountName.
-     * @return \Illuminate\Http\JsonResponse The user's details or an error message.
-     */
+    * @OA\Get(
+    * path="/api/users/{samAccountName}",
+    * summary="Retrieve detailed user information",
+    * description="Retrieves detailed information for a specific user based on samAccountName and domain.",
+    * tags={"Users"},
+    * @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string")),
+    * @OA\Parameter(name="samAccountName", in="path", required=true, @OA\Schema(type="string")),
+    * @OA\Response(response=200, description="User details retrieved successfully"),
+    * @OA\Response(response=400, description="Validation error"),
+    * @OA\Response(response=404, description="User not found"),
+    * @OA\Response(response=500, description="Server error")
+    * )
+    */
     public function show(Request $request)
     {
         $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
@@ -459,11 +421,24 @@ class UserController extends Controller
     }
 
     /**
-     * Enables a user's account in Active Directory.
-     *
-     * @param Request $request The incoming HTTP request.
-     * @return \Illuminate\Http\JsonResponse A success message or an error.
-     */
+    * @OA\Post(
+    * path="/api/users/enable",
+    * summary="Enable user account",
+    * description="Enables a user account in Active Directory (sets userAccountControl flag 512).",
+    * tags={"Users"},
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(
+    * required={"domain", "samAccountName"},
+    * @OA\Property(property="domain", type="string"),
+    * @OA\Property(property="samAccountName", type="string")
+    * )
+    * ),
+    * @OA\Response(response=200, description="Account enabled successfully"),
+    * @OA\Response(response=404, description="User not found"),
+    * @OA\Response(response=500, description="Server error")
+    * )
+    */
     public function enableAccount(Request $request)
     {
         $validator = Validator::make($request->all(), ['domain' => 'required|string', 'samAccountName' => 'required|string']);
@@ -483,7 +458,68 @@ class UserController extends Controller
         }
     }
 
-    // --- Private Helper Methods ---
+    // ------------------ PRIVATE METHODS ------------------
+
+    /**
+     * Replaces the {domain-components} placeholder in a string with the LDAP DC format.
+     * * @param string $string The string containing the placeholder.
+     * @param string $domain The domain to generate components from.
+     * @return string The modified string.
+     */
+    private function _replaceDomainComponents(string $string, string $domain): string
+    {
+        $domainComponents = 'dc=' . str_replace('.', ',dc=', $domain);
+        return str_replace('{domain-components}', $domainComponents, $string);
+    }
+
+    /**
+     * Dynamically sets the default LDAP connection using service account credentials.
+     * It fetches connection details from the .env file and establishes a
+     * connection to the specified domain's Active Directory servers.
+     *
+     * @param string $domain The domain to connect to.
+     * @return void
+     * @throws \Exception If configuration is missing or connection fails.
+     */
+    private function setLdapConnection(string $domain): void
+    {
+        // Get connection details from the .env file
+        $hosts = [env('LDAP_HOST')];
+        $username = env('LDAP_USERNAME');
+        $password = env('LDAP_PASSWORD');
+        $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
+
+        if (empty($hosts[0]) || empty($username) || empty($password)) {
+            throw new \Exception("AD connection details (LDAP_HOST, LDAP_USERNAME, LDAP_PASSWORD) are missing in your .env file.");
+        }
+
+        $connection = new Connection([
+            'hosts' => $hosts,
+            'base_dn' => $baseDn,
+            'username' => $username,
+            'password' => $password,
+            'port' => env('LDAP_PORT', 389),
+            'use_ssl' => env('LDAP_SSL', false),
+            'use_tls' => env('LDAP_TLS', false),
+            'version' => 3,
+            'timeout' => env('LDAP_TIMEOUT', 5),
+            'options' => [
+                // Set TLS options based on .env for allowing self-signed certs etc.
+                // LDAPTLS_REQCERT=never is equivalent to LDAP_OPT_X_TLS_NEVER
+                LDAP_OPT_X_TLS_REQUIRE_CERT => env('LDAP_TLS_INSECURE', false) ? LDAP_OPT_X_TLS_NEVER : LDAP_OPT_X_TLS_DEMAND,
+            ]
+        ]);
+
+        try {
+            $connection->connect();
+            Container::addConnection($connection, $domain);
+            Container::setDefaultConnection($domain);
+            Log::info("Successfully connected to AD for domain {$domain}");
+        } catch (LdapRecordException $e) {
+            Log::error("Failed to connect to any AD server for domain {$domain}: " . $e->getMessage());
+            throw new \Exception("Unable to connect to the configured AD server for domain {$domain}.");
+        }
+    }
 
     /**
      * Checks if a corresponding admin account exists for a given base account name.

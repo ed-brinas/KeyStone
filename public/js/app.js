@@ -17,17 +17,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- UI Functions ---
     const showScreen = (screenName) => {
-        Object.values(screens).forEach(s => s.style.display = 'none');
-        if (screenName === 'main') {
+        Object.values(screens).forEach(s => { if (s) s.style.display = 'none'; });
+        if (screenName === 'main' && screens.main) {
             screens.main.style.display = 'block';
         } else if (screens[screenName]) {
             screens[screenName].style.display = 'flex';
         }
     };
 
-    const showLoading = (show) => { screens.loading.style.display = show ? 'flex' : 'none'; };
+    const showLoading = (show) => {
+        if (screens.loading) {
+            screens.loading.style.display = show ? 'flex' : 'none';
+        }
+    };
 
     const showAlert = (message, type = 'danger') => {
+        if (!alertPlaceholder) return;
         const wrapper = document.createElement('div');
         wrapper.innerHTML = [
             `<div class="alert alert-${type} alert-dismissible fade show" role="alert">`,
@@ -54,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...(csrfToken && {'X-CSRF-TOKEN': csrfToken.getAttribute('content')}),
                     ...options.headers
                 },
-                credentials: 'omit' // Use omit for APIs with tokens, 'include' for cookie-based auth
+                credentials: 'include'
             };
 
             if (mergedOptions.body && typeof mergedOptions.body !== 'string') {
@@ -64,7 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(url, mergedOptions);
 
             if (response.status === 401) {
-                // Handle unauthorized access by redirecting to login
                 showScreen('login');
                 throw new Error('Unauthorized');
             }
@@ -101,20 +105,42 @@ document.addEventListener('DOMContentLoaded', () => {
         await handleSearch();
     };
 
+    /*
     const tryAutoLogin = async () => {
         try {
-             // First, get config, as it's not protected
             config = await apiFetch(`${API_BASE_URL}/config`);
             const loginDomainSelect = document.getElementById('login-domain');
-            config.domains.forEach(d => {
-                loginDomainSelect.add(new Option(d, d));
-            });
+            if (loginDomainSelect) {
+                config.domains.forEach(d => {
+                    loginDomainSelect.add(new Option(d, d));
+                });
+            }
 
-            // Then, check if user is already authenticated
             currentUser = await apiFetch(`${API_BASE_URL}/auth/me`);
             await setupMainApplication();
         } catch (error) {
-            // This is expected if not logged in
+            showScreen('login');
+        }
+    };
+    */
+
+    const initializeLoginScreen = async () => {
+        try {
+            // Fetch the configuration to populate the domain dropdown
+            config = await apiFetch(`${API_BASE_URL}/config`);
+            const loginDomainSelect = document.getElementById('login-domain');
+            if (loginDomainSelect) {
+                // Clear existing options before adding new ones
+                loginDomainSelect.innerHTML = '';
+                config.domains.forEach(d => {
+                    loginDomainSelect.add(new Option(d, d));
+                });
+            }
+        } catch (error) {
+            showAlert('Failed to load application configuration. Please refresh the page.');
+            console.error('Error fetching initial config:', error);
+        } finally {
+            // Always show the login screen on initial load
             showScreen('login');
         }
     };
@@ -122,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const handleLogin = async (e) => {
         e.preventDefault();
         const form = e.target;
-        loginError.classList.add('d-none');
+        if (loginError) loginError.classList.add('d-none');
 
         const data = {
             domain: form.querySelector('#login-domain').value,
@@ -132,12 +158,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await apiFetch(`${API_BASE_URL}/auth/login`, { method: 'POST', body: data });
-            // After successful login, try to get user data again
             currentUser = await apiFetch(`${API_BASE_URL}/auth/me`);
             await setupMainApplication();
         } catch (error) {
-            loginError.textContent = error.message || 'Login failed. Please check your credentials.';
-            loginError.classList.remove('d-none');
+            if(loginError) {
+                loginError.textContent = error.message || 'Login failed. Please check your credentials.';
+                loginError.classList.remove('d-none');
+            }
         }
     };
 
@@ -147,12 +174,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error("Logout failed:", error.message);
         } finally {
-            currentUser = null;
-            config = null;
-            showScreen('login');
+            //currentUser = null;
+            //config = null;
+            window.location.reload(); // Reload to clear state and go to login
         }
     };
-
 
     const handleSearch = async () => {
         const domain = document.getElementById('domain-select').value;
@@ -206,12 +232,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const handleShowCreateModal = () => {
         document.getElementById('create-user-form').reset();
-
         const standardGroupsContainer = document.getElementById('create-standard-groups-container');
         const standardGroupsList = document.getElementById('create-standard-groups-list');
         const adminContainer = document.getElementById('create-admin-container');
         const adminCheckbox = document.getElementById('create-admin-account');
         const privilegeGroupsContainer = document.getElementById('create-privilege-groups-container');
+        const privilegeGroupsList = document.getElementById('create-privilege-groups-list');
 
         standardGroupsContainer.style.display = 'none';
         adminContainer.style.display = 'none';
@@ -287,7 +313,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const body = { domain, samAccountName: sam };
             let result;
-            let actionPath = action.replace(/([A-Z])/g, '-$1').toLowerCase();
 
             switch(action) {
                 case 'reset-pw':
@@ -395,40 +420,88 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Event Listeners and Initialization ---
-    document.getElementById('login-form').addEventListener('submit', handleLogin);
-    document.getElementById('logout-btn').addEventListener('click', handleLogout);
-    document.getElementById('try-again-btn').addEventListener('click', () => showScreen('login'));
-    document.getElementById('search-users-btn').addEventListener('click', handleSearch);
-    document.getElementById('create-user-show-modal-btn').addEventListener('click', () => { handleShowCreateModal(); createUserModal.show(); });
-    document.getElementById('create-user-form').addEventListener('submit', handleCreateSubmit);
-    document.getElementById('edit-user-form').addEventListener('submit', handleEditSubmit);
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
 
-    document.getElementById('create-admin-account').addEventListener('change', (e) => {
-        document.getElementById('create-privilege-groups-container').style.display = e.target.checked ? 'block' : 'none';
-    });
-    document.getElementById('edit-admin-account').addEventListener('change', (e) => {
-        document.getElementById('edit-privilege-groups-container').style.display = e.target.checked ? 'block' : 'none';
-    });
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', handleLogout);
+    }
 
-    document.getElementById('user-table-body').addEventListener('click', (e) => {
-        const button = e.target.closest('button[data-action]');
-        if (!button) return;
-        const sam = button.dataset.sam;
-        const domain = document.getElementById('domain-select').value;
-        const action = button.dataset.action;
-        const messages = {
-            'reset-pw': `Are you sure you want to reset the password for ${sam}?`,
-            'reset-admin-pw': `Are you sure you want to reset the ADMIN password for the account associated with ${sam}?`,
-            'unlock': `Are you sure you want to unlock the account for ${sam}?`,
-            'disable': `Are you sure you want to DISABLE the account for ${sam}?`,
-            'enable': `Are you sure you want to ENABLE the account for ${sam}?`,
-        };
-        if(action === 'edit') {
-            handleShowEditModal(sam, domain);
-        } else {
-            handleUserAction(action, sam, domain, messages[action]);
-        }
-    });
+    const tryAgainBtn = document.getElementById('try-again-btn');
+    if (tryAgainBtn) {
+        tryAgainBtn.addEventListener('click', () => showScreen('login'));
+    }
+
+    const searchUsersBtn = document.getElementById('search-users-btn');
+    if (searchUsersBtn) {
+        searchUsersBtn.addEventListener('click', handleSearch);
+    }
+
+    const showCreateModalBtn = document.getElementById('create-user-show-modal-btn');
+    if (showCreateModalBtn) {
+        showCreateModalBtn.addEventListener('click', () => {
+            if(createUserModal) {
+                handleShowCreateModal();
+                createUserModal.show();
+            }
+        });
+    }
+
+    const createUserForm = document.getElementById('create-user-form');
+    if (createUserForm) {
+        createUserForm.addEventListener('submit', handleCreateSubmit);
+    }
+
+    const editUserForm = document.getElementById('edit-user-form');
+    if (editUserForm) {
+        editUserForm.addEventListener('submit', handleEditSubmit);
+    }
+
+    const createAdminAccountCheckbox = document.getElementById('create-admin-account');
+    if (createAdminAccountCheckbox) {
+        createAdminAccountCheckbox.addEventListener('change', (e) => {
+            const privilegeGroupsContainer = document.getElementById('create-privilege-groups-container');
+            if (privilegeGroupsContainer) {
+                privilegeGroupsContainer.style.display = e.target.checked ? 'block' : 'none';
+            }
+        });
+    }
+
+    const editAdminAccountCheckbox = document.getElementById('edit-admin-account');
+    if (editAdminAccountCheckbox) {
+        editAdminAccountCheckbox.addEventListener('change', (e) => {
+            const privilegeGroupsContainer = document.getElementById('edit-privilege-groups-container');
+            if (privilegeGroupsContainer) {
+                privilegeGroupsContainer.style.display = e.target.checked ? 'block' : 'none';
+            }
+        });
+    }
+
+    const userTableBody = document.getElementById('user-table-body');
+    if (userTableBody) {
+        userTableBody.addEventListener('click', (e) => {
+            const button = e.target.closest('button[data-action]');
+            if (!button) return;
+            const sam = button.dataset.sam;
+            const domain = document.getElementById('domain-select').value;
+            const action = button.dataset.action;
+            const messages = {
+                'reset-pw': `Are you sure you want to reset the password for ${sam}?`,
+                'reset-admin-pw': `Are you sure you want to reset the ADMIN password for the account associated with ${sam}?`,
+                'unlock': `Are you sure you want to unlock the account for ${sam}?`,
+                'disable': `Are you sure you want to DISABLE the account for ${sam}?`,
+                'enable': `Are you sure you want to ENABLE the account for ${sam}?`,
+            };
+            if(action === 'edit') {
+                handleShowEditModal(sam, domain);
+            } else {
+                handleUserAction(action, sam, domain, messages[action]);
+            }
+        });
+    }
 
     document.body.addEventListener('click', (e) => {
         const button = e.target.closest('.copy-btn, #copy-password-btn');
@@ -440,10 +513,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    createUserModal = new bootstrap.Modal(document.getElementById('create-user-modal'));
-    editUserModal = new bootstrap.Modal(document.getElementById('edit-user-modal'));
-    resetPasswordResultModal = new bootstrap.Modal(document.getElementById('reset-password-result-modal'));
-    createUserResultModal = new bootstrap.Modal(document.getElementById('create-user-result-modal'));
+    try {
+        const createUserModalEl = document.getElementById('create-user-modal');
+        if (createUserModalEl) createUserModal = new bootstrap.Modal(createUserModalEl);
 
-    tryAutoLogin();
+        const editUserModalEl = document.getElementById('edit-user-modal');
+        if (editUserModalEl) editUserModal = new bootstrap.Modal(editUserModalEl);
+
+        const resetPasswordResultModalEl = document.getElementById('reset-password-result-modal');
+        if (resetPasswordResultModalEl) resetPasswordResultModal = new bootstrap.Modal(resetPasswordResultModalEl);
+
+        const createUserResultModalEl = document.getElementById('create-user-result-modal');
+        if (createUserResultModalEl) createUserResultModal = new bootstrap.Modal(createUserResultModalEl);
+    } catch(e) {
+        console.error("Error initializing Bootstrap modals:", e);
+    }
+
+    //tryAutoLogin();
+    initializeLoginScreen();
 });
