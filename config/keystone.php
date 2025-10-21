@@ -13,8 +13,8 @@
 return [
 
     'adSettings' => [
-        'forestRootDomain' => env('AD_FOREST_ROOT_DOMAIN', 'ncc.local'),
-        'domains' => explode(',', env('AD_DOMAINS', 'ncc.local,ems.ncc.local')),
+        'forestRootDomain' => env('LDAP_FOREST_ROOT_DOMAIN', 'ncc.local'),
+        'domains' => explode(',', env('LDAP_DOMAINS', 'ncc.local,ems.ncc.local')),
     ],
 
     'applicationAccessControl' => [

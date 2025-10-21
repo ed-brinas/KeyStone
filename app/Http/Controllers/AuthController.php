@@ -2,167 +2,103 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\LoginRequest;
+use App\Models\User as LocalUser;
+use App\Services\AdService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use LdapRecord\Container;
-use LdapRecord\Connection;
-use LdapRecord\Models\ActiveDirectory\User;
-use LdapRecord\LdapRecordException;
 
 class AuthController extends Controller
 {
-    /**
-    * @OA\Post(
-    * path="/api/login",
-    * summary="Authenticate user and generate token",
-    * description="Validates user credentials and returns an access token upon successful authentication.",
-    * tags={"Authentication"},
-    * @OA\RequestBody(
-    * required=true,
-    * @OA\JsonContent(
-    * required={"domain", "username", "password"},
-    * @OA\Property(property="domain", type="string", example="example.com"),
-    * @OA\Property(property="username", type="string", example="jdoe"),
-    * @OA\Property(property="password", type="string", example="password123")
-    * )
-    * ),
-    * @OA\Response(response=200, description="Login successful, token returned"),
-    * @OA\Response(response=401, description="Invalid credentials"),
-    * @OA\Response(response=422, description="Validation error"),
-    * @OA\Response(response=500, description="Server error")
-    * )
-    */
-    public function login(Request $request)
+    protected AdService $adService;
+
+    public function __construct(AdService $adService)
     {
-        $validator = Validator::make($request->all(), [
-            'domain' => 'required|string',
-            'username' => 'required|string',
-            'password' => 'required|string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
-        }
-
-        $credentials = $request->only('username', 'password');
-        $domain = $request->input('domain');
-
-        // Dynamically set up a connection for the selected domain to validate credentials
-        $connection = new Connection([
-            'hosts' => [env('LDAP_HOST')],
-            'username' => $credentials['username'] . '@' . $domain,
-            'password' => $credentials['password'],
-            'base_dn' => 'dc=' . str_replace('.', ',dc=', $domain),
-            'port' => env('LDAP_PORT', 389),
-            'use_ssl' => env('LDAP_SSL', false),
-            'use_tls' => env('LDAP_TLS', false),
-        ]);
-
-        try {
-            // Attempt to bind with the user's credentials
-            $connection->connect();
-
-            // If the bind is successful, the credentials are valid.
-            // We'll now use the admin credentials to find the user and log them in.
-            config([
-                'ldap.connections.default.hosts.0' => env('LDAP_HOST'),
-                'ldap.connections.default.username' => env('LDAP_USERNAME'),
-                'ldap.connections.default.password' => env('LDAP_PASSWORD'),
-                'ldap.connections.default.base_dn' => 'dc=' . str_replace('.', ',dc=', $domain),
-            ]);
-
-            Auth::shouldUse('default');
-
-            if (Auth::attempt($credentials)) {
-                $request->session()->regenerate();
-                Log::info('User ' . $credentials['username'] . ' successfully authenticated.');
-                return response()->json(['message' => 'Login successful']);
-            }
-
-        } catch (LdapRecordException $e) {
-            Log::error('LDAP bind failed for user ' . $credentials['username'] . ': ' . $e->getMessage());
-            // This catches bind failures, which means invalid credentials
-            return response()->json(['message' => 'Invalid credentials'], 401);
-        } catch (\Exception $e) {
-            Log::error('An unexpected error occurred during login for user ' . $credentials['username'] . ': ' . $e->getMessage());
-            return response()->json(['message' => 'An unexpected error occurred.'], 500);
-        }
-
-        return response()->json(['message' => 'Invalid credentials'], 401);
+        $this->adService = $adService;
     }
 
     /**
-    * @OA\Get(
-    * path="/api/me",
-    * summary="Get authenticated user's information",
-    * description="Returns information about the currently authenticated user.",
-    * tags={"Authentication"},
-    * security={{"bearerAuth":{}}},
-    * @OA\Response(response=200, description="Authenticated user info returned"),
-    * @OA\Response(response=401, description="User not authenticated")
-    * )
-    */
-    public function me()
-    {
-        if (!Auth::check()) {
-            return response()->json(['message' => 'User is not authenticated.'], 401);
-        }
-
-        $user = Auth::user();
-        $domain = config('keystone.adSettings.forestRootDomain');
-        $generalAccessGroups = config('keystone.applicationAccessControl.generalAccessGroups', []);
-        $highPrivilegeGroups = config('keystone.applicationAccessControl.highPrivilegeGroups', []);
-
-        $userGroups = $user->groups()->get()->pluck('cn')->flatten()->toArray();
-
-        $canAccess = count(array_intersect($userGroups, $this->getGroupNames($generalAccessGroups, $domain))) > 0;
-        $isHighPrivilege = count(array_intersect($userGroups, $this->getGroupNames($highPrivilegeGroups, $domain))) > 0;
-
-        if (!$canAccess && !$isHighPrivilege) {
-             return response()->json(['message' => 'Authorization Denied.'], 403);
-        }
-
-        return response()->json([
-            'name' => $user->samaccountname[0],
-            'isHighPrivilege' => $isHighPrivilege,
-        ]);
-    }
-
-    /**
-    * @OA\Post(
-    * path="/api/logout",
-    * summary="Logout authenticated user",
-    * description="Invalidates the user's current JWT token and logs them out of the session.",
-    * tags={"Authentication"},
-    * security={{"bearerAuth":{}}},
-    * @OA\Response(response=200, description="Logout successful"),
-    * @OA\Response(response=401, description="User not authenticated"),
-    * @OA\Response(response=500, description="Server error")
-    * )
-    */
-    public function logout(Request $request)
-    {
-        Auth::logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
-        return response()->json(['message' => 'Successfully logged out']);
-    }
-
-    /**
-     * Helper to extract CN from DNs
+     * @OA\Post(
+     * path="/api/v1/login",
+     * summary="Authenticate user against Active Directory",
+     * tags={"Authentication"},
+     * @OA\RequestBody(
+     * required=true,
+     * @OA\JsonContent(
+     * required={"username", "password", "domain"},
+     * @OA\Property(property="username", type="string", example="jdoe"),
+     * @OA\Property(property="password", type="string", format="password", example="Password123"),
+     * @OA\Property(property="domain", type="string", example="ncc.local")
+     * )
+     * ),
+     * @OA\Response(
+     * response=200,
+     * description="Successful authentication",
+     * @OA\JsonContent(
+     * @OA\Property(property="token", type="string")
+     * )
+     * ),
+     * @OA\Response(response=401, description="Invalid credentials or not authorized"),
+     * @OA\Response(response=422, description="Validation error")
+     * )
      */
-    private function getGroupNames(array $groupDns, string $domain): array
+    public function login(LoginRequest $request): JsonResponse
     {
-        $names = [];
-        foreach ($groupDns as $dn) {
-            $fullDn = str_replace('{domain-components}', 'dc=' . str_replace('.', ',dc=', $domain), $dn);
-            preg_match('/CN=([^,]+)/', $fullDn, $matches);
-            if (isset($matches[1])) {
-                $names[] = $matches[1];
-            }
+        $domain = $request->input('domain');
+        $username = $request->input('username');
+        $password = $request->input('password');
+
+        $connectionName = str_replace('.', '_', $domain);
+        Container::setDefault($connectionName);
+
+        if (!$this->adService->authenticate($username, $password)) {
+            throw ValidationException::withMessages([
+                'username' => ['The provided credentials do not match our records.'],
+            ]);
         }
-        return $names;
+        
+        $adUser = $this->adService->findUserByUsername($username);
+
+        if (!$adUser || !$this->adService->isUserAuthorizedToLogin($adUser)) {
+             throw ValidationException::withMessages([
+                'username' => ['You are not authorized to access this application.'],
+            ]);
+        }
+
+        // Find or create a local user record
+        $localUser = LocalUser::firstOrCreate(
+            ['username' => $adUser->getSamAccountName()],
+            [
+                'name' => $adUser->getDisplayName(),
+                'email' => $adUser->getEmail(),
+                'password' => Hash::make(str()->random(20)) // Set a random password, not used for login
+            ]
+        );
+
+        // Sync roles and permissions
+        $this->adService->syncUserRolesAndPermissions($localUser, $adUser);
+
+        // Create API token
+        $token = $localUser->createToken('api-token')->plainTextToken;
+
+        return response()->json(['token' => $token]);
+    }
+
+    /**
+     * @OA\Post(
+     * path="/api/v1/logout",
+     * summary="Log out the current user",
+     * tags={"Authentication"},
+     * security={{"sanctum":{}}},
+     * @OA\Response(response=204, description="Successfully logged out")
+     * )
+     */
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+        return response()->json([], 204);
     }
 }

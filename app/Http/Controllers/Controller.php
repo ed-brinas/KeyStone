@@ -2,28 +2,29 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Foundation\Bus\DispatchesJobs;
+use Illuminate\Foundation\Validation\ValidatesRequests;
+use Illuminate\Routing\Controller as BaseController;
+
 /**
  * @OA\Info(
- *      version="1.0.0",
- *      title="Keystone API",
- *      description="Unified API documentation for authentication and user management.",
- *      @OA\Contact(email="support@example.com")
+ * title="KeyStone Active Directory API",
+ * version="1.0.0",
+ * description="API for managing on-premise Active Directory users and groups.",
+ * @OA\Contact(
+ * email="support@example.com",
+ * name="API Support"
  * )
- *
- * @OA\Server(
- *      url="http://localhost:8000",
- *      description="Local API Server"
  * )
- *
  * @OA\SecurityScheme(
- *      securityScheme="bearerAuth",
- *      type="http",
- *      scheme="bearer",
- *      bearerFormat="JWT"
+ * securityScheme="sanctum",
+ * type="http",
+ * scheme="bearer",
+ * bearerFormat="JWT"
  * )
  */
-abstract class Controller
+class Controller extends BaseController
 {
-
+    use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
 }
-
