@@ -1,29 +1,38 @@
 <?php
 
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\PasswordController;
-use App\Http\Controllers\UserController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\HealthController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\PasswordController;
 
-// --- Public Routes ---
-Route::post('/v1/login', [AuthController::class, 'login']);
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register API routes for your application. These
+| routes are loaded by the RouteServiceProvider and all of them will
+| be assigned to the "api" middleware group. Make something great!
+|
+*/
 
-// --- Protected Routes ---
+// Public routes
+Route::post('/v1/login', [AuthController::class, 'login'])->name('login');
+Route::get('/v1/health', [HealthController::class, 'check']);
+
+// Protected routes (require auth token)
 Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
-    // Auth
     Route::post('/logout', [AuthController::class, 'logout']);
 
     // User Management
-    Route::post('/users', [UserController::class, 'store'])->middleware('permission:create-user');
-    Route::get('/users/{user}', [UserController::class, 'show'])->middleware('permission:view-user');
-    Route::put('/users/{user}', [UserController::class, 'update'])->middleware('permission:edit-user');
-
-    // User Status Control
-    Route::patch('/users/{user}/enable', [UserController::class, 'enable'])->middleware('permission:edit-user-status');
-    Route::patch('/users/{user}/disable', [UserController::class, 'disable'])->middleware('permission:edit-user-status');
-    Route::patch('/users/{user}/unlock', [UserController::class, 'unlock'])->middleware('permission:edit-user-status');
+    Route::apiResource('users', UserController::class)->only(['index', 'show', 'store', 'update']);
+    Route::post('users/{samAccountName}/enable', [UserController::class, 'enableAccount']);
+    Route::post('users/{samAccountName}/disable', [UserController::class, 'disableAccount']);
+    Route::post('users/{samAccountName}/unlock', [UserController::class, 'unlockAccount']);
 
     // Password Management
-    Route::post('/users/{user}/reset-password', [PasswordController::class, 'resetStandardPassword'])->middleware('permission:reset-password');
-    Route::post('/users/{user}/reset-admin-password', [PasswordController::class, 'resetAdminPassword'])->middleware('permission:reset-admin-password');
+    Route::post('passwords/reset-standard', [PasswordController::class, 'resetStandardPassword']);
+    Route::post('passwords/reset-admin', [PasswordController::class, 'resetAdminPassword']);
 });

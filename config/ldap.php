@@ -1,71 +1,58 @@
 <?php
 
-// Note: The 'use LdapRecord\Connection;' statement has been removed as it's no longer needed after the fix.
+// Dynamically build connections for each domain in the .env file
+$domains = array_filter(array_map('trim', explode(',', env('LDAP_DOMAINS', ''))));
 
-// Dynamically build connections from keystone config
 $connections = [];
-$keystoneConfig = require __DIR__ . '/keystone.php';
-$domains = $keystoneConfig['adSettings']['domains'] ?? [env('LDAP_HOST')];
-$defaultBaseDn = env('LDAP_BASE_DN', '');
+
+// Get settings from .env
+$useSsl = env('LDAP_SSL', false);
+$useTls = env('LDAP_TLS', false);
+$port = env('LDAP_PORT', 389);
+$insecure = env('LDAP_TLS_INSECURE', false);
+
+// Last-ditch effort: If TLS is on, force-disable cert validation
+// This is the only way to bypass self-signed cert errors if .env fails
+$options = [];
+if ($useTls && $insecure) {
+    $options[LDAP_OPT_X_TLS_REQUIRE_CERT] = LDAP_OPT_X_TLS_NEVER;
+}
 
 foreach ($domains as $domain) {
-    // Generate a connection name, e.g., 'ncc_local' from 'ncc.local'
-    $connectionName = str_replace('.', '_', $domain);
-    
-    // Convert domain to DN format, e.g., 'dc=ncc,dc=local'
-    $baseDn = 'dc=' . str_replace('.', ',dc=', $domain);
-
-    $connections[$connectionName] = [
-        'hosts' => [$domain], // Use the domain itself as the host
-        'base_dn' => $baseDn,
+    $connections[$domain] = [
+        // --- FIX ---
+        // Use the specific host from .env (e.g., dc01.ncc.lab)
+        // This is more reliable if DNS auto-discovery is failing.
+        'hosts' => [env('LDAP_HOST', $domain)], 
+        
         'username' => env('LDAP_USERNAME'),
         'password' => env('LDAP_PASSWORD'),
-        'port' => env('LDAP_PORT', 389),
-        'use_ssl' => env('LDAP_SSL', false),
-        'use_tls' => env('LDAP_TLS', false),
-        'options' => [
-            // See: http://php.net/ldap_set_option
-            // FIX: Use the correct global PHP constants for LDAP options.
-            LDAP_OPT_PROTOCOL_VERSION => 3,
-            LDAP_OPT_REFERRALS => false,
-        ],
-        'version' => 3,
+        'port' => (int)$port,
+        'base_dn' => 'dc=' . str_replace('.', ',dc=', $domain),
         'timeout' => env('LDAP_TIMEOUT', 5),
-        'follow_referrals' => false,
+        'use_ssl' => $useSsl,
+        'use_tls' => $useTls,
+        'use_sasl' => env('LDAP_SASL', false),
+        'sasl_options' => [],
+        
+        // Apply the TLS options
+        'options' => $options, 
     ];
 }
 
+$defaultConnection = env('LDAP_CONNECTION', 'default');
+if (!in_array($defaultConnection, $domains) && !empty($domains)) {
+    $defaultConnection = $domains[0];
+}
 
 return [
-    /*
-    |--------------------------------------------------------------------------
-    | Default LDAP Connection Name
-    |--------------------------------------------------------------------------
-    */
-    'default' => env('LDAP_CONNECTION', 'default'),
-
-    /*
-    |--------------------------------------------------------------------------
-    | LDAP Connections
-    |--------------------------------------------------------------------------
-    */
+    'default' => $defaultConnection,
     'connections' => $connections,
-
-    /*
-    |--------------------------------------------------------------------------
-    | LDAP Logging
-    |--------------------------------------------------------------------------
-    */
     'logging' => [
         'enabled' => env('LDAP_LOGGING', true),
         'channel' => env('LOG_CHANNEL', 'stack'),
+        'level' => env('LOG_LEVEL', 'info'),
     ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | LDAP Cache
-    |--------------------------------------------------------------------------
-    */
     'cache' => [
         'enabled' => env('LDAP_CACHE', false),
         'driver' => env('CACHE_DRIVER', 'file'),
