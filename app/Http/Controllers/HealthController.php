@@ -6,11 +6,8 @@ use App\Services\AdService;
 use Illuminate\Http\JsonResponse;
 
 /**
- * @OA\Tag(
- * name="Health Check",
- * description="API health and connectivity endpoints."
- * )
- */
+* @OA\Tag(name="Health Check", description="API health and connectivity endpoints.")
+*/
 class HealthController extends Controller
 {
     protected AdService $adService;
@@ -20,23 +17,15 @@ class HealthController extends Controller
         $this->adService = $adService;
     }
 
-    /**
-     * @OA\Get(
-     * path="/api/v1/health",
-     * summary="Check API and AD connectivity",
-     * tags={"Health Check"},
-     * @OA\Response(
-     * response=200,
-     * description="Connectivity status",
-     * @OA\JsonContent(
-     * properties={
-     * @OA\Property(property="api_status", type="string", example="online"),
-     * @OA\Property(property="ad_connectivity", type="object")
-     * }
-     * )
-     * )
-     * )
-     */
+/**
+* @OA\Get(
+* path="/api/v1/health",
+* summary="Check API and AD connectivity",
+* tags={"Health Check"},
+* @OA\Response(response=200, description="API health information"),
+* @OA\Response(response=503, description="Service unavailable")
+* )
+*/
     public function check(): JsonResponse
     {
         $adStatus = $this->adService->checkAdConnectivity();

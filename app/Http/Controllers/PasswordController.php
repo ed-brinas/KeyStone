@@ -10,6 +10,24 @@ use Illuminate\Support\Facades\Validator; // <-- For manual validation
 use Illuminate\Validation\Rule; // <-- For domain rule
 use Illuminate\Support\Facades\Auth; // <-- For auth checks
 
+/**
+* @OA\Schema(
+* schema="ResetStandardPasswordRequest",
+* type="object",
+* required={"username", "new_password"},
+* @OA\Property(property="username", type="string", example="jdoe", description="The username whose password should be reset"),
+* @OA\Property(property="new_password", type="string", example="NewSecureP@ssw0rd", description="The new password to set for the user")
+* )
+*
+* @OA\Schema(
+* schema="ResetAdminPasswordRequest",
+* type="object",
+* required={"admin_username", "target_username", "new_password"},
+* @OA\Property(property="admin_username", type="string", example="admin.user", description="The admin performing the reset"),
+* @OA\Property(property="target_username", type="string", example="jdoe", description="The username whose password is being reset"),
+* @OA\Property(property="new_password", type="string", example="StrongAdminP@ss!23", description="The new password to assign to the user")
+* )
+*/
 class PasswordController extends Controller
 {
     protected AdService $adService;
@@ -20,28 +38,20 @@ class PasswordController extends Controller
     }
 
     /**
-     * @OA\Post(
-     * path="/api/v1/passwords/reset-standard",
-     * summary="Reset a standard user's password",
-     * tags={"Password Management"},
-     * security={{"sanctum":{}}},
-     * @OA\RequestBody(
-     * required=true,
-     * description="User identification",
-     * @OA\JsonContent(ref="#/components/schemas/ResetStandardPasswordRequest")
-     * ),
-     * @OA\Response(
-     * response=200,
-     * description="Password reset successfully",
-     * @OA\JsonContent(
-     * @OA\Property(property="message", type="string", example="Password reset successfully."),
-     * @OA\Property(property="initial_password", type="string", example="nEw!P@ssw0rd")
-     * )
-     * ),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
-     * )
-     */
+    * @OA\Post(
+    * path="/api/v1/passwords/reset-standard",
+    * summary="Reset a standard user password",
+    * tags={"Password Management"},
+    * security={{"bearerAuth": {}}},
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(ref="#/components/schemas/ResetStandardPasswordRequest")
+    * ),
+    * @OA\Response(response=200, description="Password reset successful"),
+    * @OA\Response(response=400, description="Invalid input or password policy violation"),
+    * @OA\Response(response=401, description="Unauthorized")
+    * )
+    */
     public function resetStandardPassword(Request $request): JsonResponse
     {
         // --- Authorization ---
@@ -80,28 +90,21 @@ class PasswordController extends Controller
     }
 
     /**
-     * @OA\Post(
-     * path="/api/v1/passwords/reset-admin",
-     * summary="Reset a privileged user's (-a) password",
-     * tags={"Password Management"},
-     * security={{"sanctum":{}}},
-     * @OA\RequestBody(
-     * required=true,
-     * description="Base user identification",
-     * @OA\JsonContent(ref="#/components/schemas/ResetAdminPasswordRequest")
-     * ),
-     * @OA\Response(
-     * response=200,
-     * description="Password reset successfully",
-     * @OA\JsonContent(
-     * @OA\Property(property="message", type="string", example="Password reset successfully."),
-     * @OA\Property(property="initial_password", type="string", example="nEw!P@ssw0rd")
-     * )
-     * ),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="Admin user not found")
-     * )
-     */
+    * @OA\Post(
+    * path="/api/v1/passwords/reset-admin",
+    * summary="Reset a user password as an administrator",
+    * tags={"Password Management"},
+    * security={{"bearerAuth": {}}},
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(ref="#/components/schemas/ResetAdminPasswordRequest")
+    * ),
+    * @OA\Response(response=200, description="Password reset successful"),
+    * @OA\Response(response=400, description="Invalid input or password policy violation"),
+    * @OA\Response(response=401, description="Unauthorized"),
+    * @OA\Response(response=403, description="Forbidden")
+    * )
+    */
     public function resetAdminPassword(Request $request): JsonResponse
     {
         // --- Authorization ---

@@ -21,56 +21,60 @@
                 "tags": [
                     "Authentication"
                 ],
-                "summary": "Authenticate user against Active Directory",
+                "summary": "Authenticate user and return Sanctum token",
                 "operationId": "da2ca4d7a5cdec77b8b45a20373535cb",
                 "requestBody": {
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/LoginRequest"
+                                "required": [
+                                    "username",
+                                    "password",
+                                    "domain"
+                                ],
+                                "properties": {
+                                    "username": {
+                                        "type": "string",
+                                        "example": "jdoe"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "P@ssw0rd123!!"
+                                    },
+                                    "domain": {
+                                        "type": "string",
+                                        "example": "ncc.lab"
+                                    }
+                                },
+                                "type": "object"
                             }
                         }
                     }
                 },
                 "responses": {
                     "200": {
-                        "description": "Successful authentication",
+                        "description": "Login successful",
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "properties": {
-                                        "message": {
-                                            "type": "string",
-                                            "example": "Authentication successful"
-                                        },
                                         "token": {
-                                            "type": "string",
-                                            "example": "1|abc..."
+                                            "type": "string"
                                         },
                                         "user": {
                                             "properties": {
-                                                "username": {
-                                                    "type": "string",
-                                                    "example": "jdoe"
-                                                },
-                                                "display_name": {
-                                                    "type": "string",
-                                                    "example": "John Doe"
+                                                "name": {
+                                                    "type": "string"
                                                 },
                                                 "email": {
-                                                    "type": "string",
-                                                    "example": "jdoe@ncc.lab"
+                                                    "type": "string"
                                                 },
                                                 "roles": {
                                                     "type": "array",
                                                     "items": {
                                                         "type": "string"
-                                                    },
-                                                    "example": [
-                                                        "L2",
-                                                        "Domain Users"
-                                                    ]
+                                                    }
                                                 }
                                             },
                                             "type": "object"
@@ -84,14 +88,11 @@
                     "401": {
                         "description": "Invalid credentials"
                     },
-                    "404": {
-                        "description": "User not found"
-                    },
-                    "422": {
-                        "description": "Invalid domain"
+                    "403": {
+                        "description": "Access denied"
                     },
                     "500": {
-                        "description": "LDAP connection error"
+                        "description": "Internal server error"
                     }
                 }
             }
@@ -101,32 +102,16 @@
                 "tags": [
                     "Authentication"
                 ],
-                "summary": "Logs out the current user",
+                "summary": "Logout the current authenticated user",
                 "operationId": "c4eddaf1a2e990cc90e4326c0d731d41",
                 "responses": {
-                    "200": {
-                        "description": "Successfully logged out",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "message": {
-                                            "type": "string",
-                                            "example": "Successfully logged out"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthenticated"
+                    "204": {
+                        "description": "Logout successful"
                     }
                 },
                 "security": [
                     {
-                        "bearerAuth": []
+                        "sanctum": []
                     }
                 ]
             }
@@ -137,26 +122,14 @@
                     "Health Check"
                 ],
                 "summary": "Check API and AD connectivity",
+                "description": "* @OA\\Get(\n* path=\"/api/v1/health\",\n* summary=\"Check API and AD connectivity\",\n* tags={\"Health Check\"},\n* @OA\\Response(response=200, description=\"API health information\"),\n* @OA\\Response(response=503, description=\"Service unavailable\")\n* )",
                 "operationId": "4007bacb94db2cad9d5b2b73d79543eb",
                 "responses": {
                     "200": {
-                        "description": "Connectivity status",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "api_status": {
-                                            "type": "string",
-                                            "example": "online"
-                                        },
-                                        "ad_connectivity": {
-                                            "type": "object"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
+                        "description": "API health information"
+                    },
+                    "503": {
+                        "description": "Service unavailable"
                     }
                 }
             }
@@ -166,10 +139,9 @@
                 "tags": [
                     "Password Management"
                 ],
-                "summary": "Reset a standard user's password",
+                "summary": "Reset a standard user password",
                 "operationId": "9621547ad719b602f5d8df74fd390e88",
                 "requestBody": {
-                    "description": "Standard password reset data",
                     "required": true,
                     "content": {
                         "application/json": {
@@ -181,15 +153,18 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Password reset successfully"
+                        "description": "Password reset successful"
                     },
-                    "404": {
-                        "description": "User not found"
+                    "400": {
+                        "description": "Invalid input or password policy violation"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 },
                 "security": [
                     {
-                        "sanctum": []
+                        "bearerAuth": []
                     }
                 ]
             }
@@ -199,10 +174,9 @@
                 "tags": [
                     "Password Management"
                 ],
-                "summary": "Reset a privileged admin account's password",
+                "summary": "Reset a user password as an administrator",
                 "operationId": "56650a0abe7978b99091021fb51f3d3f",
                 "requestBody": {
-                    "description": "Admin password reset data",
                     "required": true,
                     "content": {
                         "application/json": {
@@ -214,15 +188,21 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "Admin password reset successfully"
+                        "description": "Password reset successful"
                     },
-                    "404": {
-                        "description": "Admin user not found"
+                    "400": {
+                        "description": "Invalid input or password policy violation"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden"
                     }
                 },
                 "security": [
                     {
-                        "sanctum": []
+                        "bearerAuth": []
                     }
                 ]
             }
@@ -230,42 +210,49 @@
         "/api/v1/users": {
             "get": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
-                "summary": "List users",
+                "summary": "List AD users by domain",
                 "operationId": "3ab81e3f9b24b4f36ab08d72349ac632",
                 "parameters": [
                     {
                         "name": "domain",
                         "in": "query",
-                        "description": "Domain to search (e.g., ncc.lab)",
+                        "description": "Domain name to filter users (e.g. ncc.lab)",
                         "required": true,
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "ncc.lab"
                         }
                     },
                     {
-                        "name": "nameFilter",
+                        "name": "name",
                         "in": "query",
-                        "description": "Filter by display name",
+                        "description": "Filter by display name contains",
+                        "required": false,
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "John"
                         }
                     },
                     {
-                        "name": "statusFilter",
+                        "name": "status",
                         "in": "query",
-                        "description": "Filter by account status (true=enabled, false=disabled)",
+                        "description": "Enabled status filter (accepts true/false or 1/0)",
+                        "required": false,
                         "schema": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "example": true
                         }
                     },
                     {
-                        "name": "hasAdminAccount",
+                        "name": "admin",
                         "in": "query",
-                        "description": "Filter by admin account existence",
+                        "description": "Has admin account filter (accepts true/false or 1/0)",
+                        "required": false,
                         "schema": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "example": false
                         }
                     }
                 ],
@@ -273,8 +260,11 @@
                     "200": {
                         "description": "List of users"
                     },
-                    "401": {
-                        "description": "Unauthenticated"
+                    "403": {
+                        "description": "Unauthorized"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -285,7 +275,7 @@
             },
             "post": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
                 "summary": "Create a new Active Directory user",
                 "operationId": "ba548b97148bb5c0d8cab3bc3f128bfd",
@@ -295,7 +285,56 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/CreateUserRequest"
+                                "required": [
+                                    "domain",
+                                    "samAccountName",
+                                    "firstName",
+                                    "lastName"
+                                ],
+                                "properties": {
+                                    "domain": {
+                                        "type": "string",
+                                        "example": "ncc.lab"
+                                    },
+                                    "samAccountName": {
+                                        "type": "string",
+                                        "example": "jdoe"
+                                    },
+                                    "firstName": {
+                                        "type": "string",
+                                        "example": "John"
+                                    },
+                                    "lastName": {
+                                        "type": "string",
+                                        "example": "Doe"
+                                    },
+                                    "dateOfBirth": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "1990-05-15"
+                                    },
+                                    "mobileNumber": {
+                                        "type": "string",
+                                        "example": "+966501234567"
+                                    },
+                                    "createAdminAccount": {
+                                        "type": "boolean",
+                                        "example": false
+                                    },
+                                    "optionalGroupsForStandardUser": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "optionalGroupsForHighPrivilegeUsers": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "type": "object"
                             }
                         }
                     }
@@ -303,6 +342,9 @@
                 "responses": {
                     "201": {
                         "description": "User created successfully"
+                    },
+                    "403": {
+                        "description": "Unauthorized"
                     },
                     "422": {
                         "description": "Validation error"
@@ -315,29 +357,30 @@
                 ]
             }
         },
-        "/api/v1/users/{samAccountName}": {
+        "/api/v1/users/{samaccountname}": {
             "get": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
-                "summary": "Get user details",
-                "operationId": "451b60d047cde9dbffe1be188a1b2ab0",
+                "summary": "Get a single user by samAccountName",
+                "operationId": "54e9ac63cdf0ba43073e029cbad6b71c",
                 "parameters": [
                     {
-                        "name": "samAccountName",
+                        "name": "samaccountname",
                         "in": "path",
                         "required": true,
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "jdoe"
                         }
                     },
                     {
                         "name": "domain",
                         "in": "query",
-                        "description": "Domain to search (e.g., ncc.lab)",
                         "required": true,
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "ncc.lab"
                         }
                     }
                 ],
@@ -347,6 +390,9 @@
                     },
                     "404": {
                         "description": "User not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -357,13 +403,13 @@
             },
             "put": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
-                "summary": "Update a user's details",
-                "operationId": "2534af74d19ad5c12f564c7834c03883",
+                "summary": "Update user details",
+                "operationId": "1f84f54633c4ba6ecbb1fdb4f46775a1",
                 "parameters": [
                     {
-                        "name": "samAccountName",
+                        "name": "samaccountname",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -377,17 +423,50 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/UpdateUserRequest"
+                                "required": [
+                                    "domain"
+                                ],
+                                "properties": {
+                                    "domain": {
+                                        "type": "string",
+                                        "example": "ncc.lab"
+                                    },
+                                    "dateOfBirth": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "1990-05-15"
+                                    },
+                                    "mobileNumber": {
+                                        "type": "string",
+                                        "example": "+966501234567"
+                                    },
+                                    "optionalGroups": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "hasAdminAccount": {
+                                        "type": "boolean"
+                                    }
+                                },
+                                "type": "object"
                             }
                         }
                     }
                 },
                 "responses": {
                     "200": {
-                        "description": "User updated successfully"
+                        "description": "User updated"
+                    },
+                    "403": {
+                        "description": "Unauthorized"
                     },
                     "404": {
                         "description": "User not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -397,16 +476,16 @@
                 ]
             }
         },
-        "/api/v1/users/{samAccountName}/enable": {
-            "post": {
+        "/api/v1/users/{samaccountname}/enable": {
+            "patch": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
                 "summary": "Enable a user account",
-                "operationId": "b26a8817de6c8140a93be568ff5eb433",
+                "operationId": "2afa0695f5e7acb2b672b52dfe265350",
                 "parameters": [
                     {
-                        "name": "samAccountName",
+                        "name": "samaccountname",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -415,9 +494,13 @@
                     }
                 ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
+                                "required": [
+                                    "domain"
+                                ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
@@ -430,11 +513,17 @@
                     }
                 },
                 "responses": {
-                    "204": {
+                    "200": {
                         "description": "Account enabled"
                     },
+                    "403": {
+                        "description": "Unauthorized"
+                    },
                     "404": {
                         "description": "User not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -444,16 +533,16 @@
                 ]
             }
         },
-        "/api/v1/users/{samAccountName}/disable": {
-            "post": {
+        "/api/v1/users/{samaccountname}/disable": {
+            "patch": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
                 "summary": "Disable a user account",
-                "operationId": "2d933859e8d3f260dc193d3dcf292a61",
+                "operationId": "1450e9a4d1dde644dd15a6a9f3a37ea3",
                 "parameters": [
                     {
-                        "name": "samAccountName",
+                        "name": "samaccountname",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -462,9 +551,13 @@
                     }
                 ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
+                                "required": [
+                                    "domain"
+                                ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
@@ -477,11 +570,17 @@
                     }
                 },
                 "responses": {
-                    "204": {
+                    "200": {
                         "description": "Account disabled"
+                    },
+                    "403": {
+                        "description": "Unauthorized"
                     },
                     "404": {
                         "description": "User not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -491,16 +590,16 @@
                 ]
             }
         },
-        "/api/v1/users/{samAccountName}/unlock": {
-            "post": {
+        "/api/v1/users/{samaccountname}/unlock": {
+            "patch": {
                 "tags": [
-                    "User Management"
+                    "Users"
                 ],
                 "summary": "Unlock a user account",
-                "operationId": "6378b893bb20244041d3f34089cddb91",
+                "operationId": "5be902c6485021d727b000b7084f5994",
                 "parameters": [
                     {
-                        "name": "samAccountName",
+                        "name": "samaccountname",
                         "in": "path",
                         "required": true,
                         "schema": {
@@ -509,9 +608,13 @@
                     }
                 ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
+                                "required": [
+                                    "domain"
+                                ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
@@ -524,11 +627,17 @@
                     }
                 },
                 "responses": {
-                    "204": {
+                    "200": {
                         "description": "Account unlocked"
+                    },
+                    "403": {
+                        "description": "Unauthorized"
                     },
                     "404": {
                         "description": "User not found"
+                    },
+                    "422": {
+                        "description": "Validation error"
                     }
                 },
                 "security": [
@@ -541,161 +650,46 @@
     },
     "components": {
         "schemas": {
-            "CreateUserRequest": {
-                "title": "Create User Request",
-                "required": [
-                    "domain",
-                    "samAccountName",
-                    "firstName",
-                    "lastName"
-                ],
-                "properties": {
-                    "domain": {
-                        "description": "Domain to create the user in (e.g., ncc.lab)",
-                        "type": "string"
-                    },
-                    "samAccountName": {
-                        "description": "User's sAMAccountName (login name)",
-                        "type": "string"
-                    },
-                    "firstName": {
-                        "description": "User's first name",
-                        "type": "string"
-                    },
-                    "lastName": {
-                        "description": "User's last name",
-                        "type": "string"
-                    },
-                    "dateOfBirth": {
-                        "description": "User's date of birth (YYYY-MM-DD)",
-                        "type": "string",
-                        "format": "date",
-                        "nullable": true
-                    },
-                    "mobileNumber": {
-                        "description": "User's mobile number",
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "createAdminAccount": {
-                        "description": "Create a privileged '-a' account for this user",
-                        "type": "boolean",
-                        "default": false
-                    },
-                    "optionalGroupsForStandardUser": {
-                        "description": "List of *standard* groups to add the user to.",
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "nullable": true
-                    },
-                    "optionalGroupsForHighPrivilegeUsers": {
-                        "description": "List of *privileged* groups to add the *admin* account to (if createAdminAccount is true).",
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "nullable": true
-                    }
-                },
-                "type": "object"
-            },
-            "LoginRequest": {
-                "title": "Login Request",
+            "ResetStandardPasswordRequest": {
                 "required": [
                     "username",
-                    "password",
-                    "domain"
+                    "new_password"
                 ],
                 "properties": {
                     "username": {
-                        "description": "The user's Active Directory username.",
+                        "description": "The username whose password should be reset",
                         "type": "string",
                         "example": "jdoe"
                     },
-                    "password": {
-                        "description": "The user's Active Directory password.",
+                    "new_password": {
+                        "description": "The new password to set for the user",
                         "type": "string",
-                        "format": "password",
-                        "example": "P@ssword123!"
-                    },
-                    "domain": {
-                        "description": "The Active Directory domain to authenticate against.",
-                        "type": "string",
-                        "example": "ncc.local"
+                        "example": "NewSecureP@ssw0rd"
                     }
                 },
                 "type": "object"
             },
             "ResetAdminPasswordRequest": {
-                "title": "Reset Admin Password Request",
                 "required": [
-                    "domain",
-                    "baseSamAccountName"
+                    "admin_username",
+                    "target_username",
+                    "new_password"
                 ],
                 "properties": {
-                    "domain": {
-                        "description": "Domain of the user (e.g., ncc.lab)",
-                        "type": "string"
-                    },
-                    "baseSamAccountName": {
-                        "description": "The sAMAccountName of the *standard* user (e.g., '118155', not '118155-a')",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "ResetStandardPasswordRequest": {
-                "title": "Reset Standard Password Request",
-                "required": [
-                    "domain",
-                    "samAccountName"
-                ],
-                "properties": {
-                    "domain": {
-                        "description": "Domain of the user (e.g., ncc.lab)",
-                        "type": "string"
-                    },
-                    "samAccountName": {
-                        "description": "sAMAccountName of the standard user to reset",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "UpdateUserRequest": {
-                "title": "Update User Request",
-                "required": [
-                    "domain"
-                ],
-                "properties": {
-                    "domain": {
-                        "description": "Domain of the user (e.g., ncc.lab)",
-                        "type": "string"
-                    },
-                    "dateOfBirth": {
-                        "description": "User's date of birth (YYYY-MM-DD)",
+                    "admin_username": {
+                        "description": "The admin performing the reset",
                         "type": "string",
-                        "format": "date",
-                        "nullable": true
+                        "example": "admin.user"
                     },
-                    "mobileNumber": {
-                        "description": "User's mobile number",
+                    "target_username": {
+                        "description": "The username whose password is being reset",
                         "type": "string",
-                        "nullable": true
+                        "example": "jdoe"
                     },
-                    "hasAdminAccount": {
-                        "description": "Manage the privileged '-a' account for this user (requires L3)",
-                        "type": "boolean"
-                    },
-                    "optionalGroups": {
-                        "description": "List of *standard* groups the user should be a member of. Groups not in this list will be removed.",
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "nullable": true
+                    "new_password": {
+                        "description": "The new password to assign to the user",
+                        "type": "string",
+                        "example": "StrongAdminP@ss!23"
                     }
                 },
                 "type": "object"
@@ -717,20 +711,20 @@
     ],
     "tags": [
         {
+            "name": "Authentication",
+            "description": "User authentication and logout endpoints."
+        },
+        {
             "name": "Health Check",
             "description": "API health and connectivity endpoints."
         },
         {
             "name": "Password Management",
-            "description": "Endpoints for resetting user and admin passwords."
+            "description": "Password Management"
         },
         {
-            "name": "User Management",
-            "description": "Endpoints for creating, updating, and managing user accounts."
-        },
-        {
-            "name": "Authentication",
-            "description": "Authentication"
+            "name": "Users",
+            "description": "Users"
         }
     ]
 }

@@ -6,38 +6,15 @@ use App\Services\AdService;
 use Illuminate\Http\Request; // <-- Use standard request
 use Illuminate\Support\Facades\Validator; // <-- For manual validation
 use Illuminate\Validation\Rule; // <-- For domain rule
-use App\Models\User as LocalUser;
+use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 
 /**
- * @OA\OpenApi(
- * @OA\Info(
- * version="1.0.0",
- * title="KeyStone AD Management API",
- * description="API for managing on-premise Active Directory",
- * @OA\Contact(email="support@example.com")
- * ),
- * @OA\Server(
- * url=L5_SWAGGER_CONST_HOST,
- * description="Local API Server"
- * ),
- * @OA\SecurityScheme(
- * securityScheme="sanctum",
- * type="http",
- * scheme="bearer",
- * bearerFormat="JWT",
- * description="Enter token in format: Bearer <token>"
- * ),
- * security={{"sanctum":{}}}
- * )
- * @OA\Tag(
- * name="Authentication",
- * description="Handles user authentication and token management."
- * )
- */
+* @OA\Tag(name="Authentication", description="User authentication and logout endpoints.")
+*/
 class AuthController extends Controller
 {
     protected AdService $adService;
@@ -48,32 +25,34 @@ class AuthController extends Controller
     }
 
     /**
-     * @OA\Post(
-     * path="/api/v1/login",
-     * summary="Authenticate user and get API token",
-     * tags={"Authentication"},
-     * @OA\RequestBody(
-     * required=true,
-     * description="User credentials for AD login",
-     * @OA\JsonContent(ref="#/components/schemas/LoginRequest")
-     * ),
-     * @OA\Response(
-     * response=200,
-     * description="Authentication successful",
-     * @OA\JsonContent(
-     * @OA\Property(property="token", type="string", example="1|abc..."),
-     * @OA\Property(property="user", type="object",
-     * @OA\Property(property="name", type="string", example="John Doe"),
-     * @OA\Property(property="email", type="string", example="jdoe@ncc.lab"),
-     * @OA\Property(property="roles", type="array", @OA\Items(type="string"), example={"l3", "domain admins", "default"})
-     * )
-     * )
-     * ),
-     * @OA\Response(response=401, description="Invalid credentials"),
-     * @OA\Response(response=403, description="Access Denied (User not in required groups)"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
+    * @OA\Post(
+    * path="/api/v1/login",
+    * summary="Authenticate user and return Sanctum token",
+    * tags={"Authentication"},
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(
+    * required={"username", "password", "domain"},
+    * @OA\Property(property="username", type="string", example="jdoe"),
+    * @OA\Property(property="password", type="string", example="P@ssw0rd123!!"),
+    * @OA\Property(property="domain", type="string", example="ncc.lab")
+    * )
+    * ),
+    * @OA\Response(response=200, description="Login successful",
+    * @OA\JsonContent(
+    * @OA\Property(property="token", type="string"),
+    * @OA\Property(property="user", type="object",
+    * @OA\Property(property="name", type="string"),
+    * @OA\Property(property="email", type="string"),
+    * @OA\Property(property="roles", type="array", @OA\Items(type="string"))
+    * )
+    * )
+    * ),
+    * @OA\Response(response=401, description="Invalid credentials"),
+    * @OA\Response(response=403, description="Access denied"),
+    * @OA\Response(response=500, description="Internal server error")
+    * )
+    */
     public function login(Request $request): JsonResponse
     {
         // --- Start Manual Validation ---
@@ -110,8 +89,8 @@ class AuthController extends Controller
             }
 
             // 3. Find or create the local user
-            $localUser = LocalUser::updateOrCreate(
-                ['username' => $adUser->getFirstAttribute('samaccountname'), 'domain' => $domain],
+            $user = User::updateOrCreate(
+                ['username' => $adUser->getFirstAttribute('samaccountname')],
                 [
                     'name' => $adUser->getFirstAttribute('displayname'),
                     'email' => $adUser->getFirstAttribute('mail') ?? $username.'@'.$domain, 
@@ -120,15 +99,14 @@ class AuthController extends Controller
             );
 
             // 4. Create and return Sanctum token
-            // The $roles array (now just strings) is passed as the token's abilities
-            $token = $localUser->createToken('ad-api-token', $roles)->plainTextToken;
+            $token = $user->createToken('ad-api-token', $roles)->plainTextToken;
 
             return response()->json([
                 'token' => $token,
                 'user' => [
-                    'name' => $localUser->name,
-                    'email' => $localUser->email,
-                    'roles' => $roles // <-- Use the raw roles array
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'roles' => $roles
                 ]
             ]);
 
@@ -139,15 +117,14 @@ class AuthController extends Controller
     }
 
     /**
-     * @OA\Post(
-     * path="/api/v1/logout",
-     * summary="Log out user and revoke current token",
-     * tags={"Authentication"},
-     * security={{"sanctum":{}}},
-     * @OA\Response(response=204, description="Successfully logged out"),
-     * @OA\Response(response=401, description="Unauthenticated")
-     * )
-     */
+    * @OA\Post(
+    * path="/api/v1/logout",
+    * summary="Logout the current authenticated user",
+    * tags={"Authentication"},
+    * security={{"sanctum": {}}},
+    * @OA\Response(response=204, description="Logout successful")
+    * )
+    */
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();

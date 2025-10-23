@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\Auth; // <-- For auth checks
 use LdapRecord\Models\ActiveDirectory\User as AdUser;
 use LdapRecord\Models\ModelNotFoundException;
 
+/**
+* @OA\Tag(name="User Management", description="Manage users across AD domains.")
+*/
 class UserController extends Controller
 {
     protected AdService $adService;
@@ -24,16 +27,17 @@ class UserController extends Controller
 
     /**
      * @OA\Get(
-     * path="/api/v1/users",
-     * summary="List users with filtering",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string"), example="ncc.lab"),
-     * @OA\Parameter(name="name", in="query", @OA\Schema(type="string"), description="Filter by display name (contains)"),
-     * @OA\Parameter(name="status", in="query", @OA\Schema(type="boolean"), description="Filter by account status (true=enabled, false=disabled)"),
-     * @OA\Parameter(name="admin", in="query", @OA\Schema(type="boolean"), description="Filter by admin account existence (true=has admin, false=no admin)"),
-     * @OA\Response(response=200, description="List of users"),
-     * @OA\Response(response=403, description="Unauthorized")
+     *   path="/api/v1/users",
+     *   summary="List AD users by domain",
+     *   tags={"Users"},
+     *   security={{"sanctum": {}}},
+     *   @OA\Parameter(name="domain", in="query", required=true, description="Domain name to filter users (e.g. ncc.lab)", @OA\Schema(type="string", example="ncc.lab")),
+     *   @OA\Parameter(name="name", in="query", required=false, description="Filter by display name contains", @OA\Schema(type="string", example="John")),
+     *   @OA\Parameter(name="status", in="query", required=false, description="Enabled status filter", @OA\Schema(type="boolean", example=true)),
+     *   @OA\Parameter(name="admin", in="query", required=false, description="Has admin account filter", @OA\Schema(type="boolean", example=false)),
+     *   @OA\Response(response=200, description="List of users"),
+     *   @OA\Response(response=403, description="Unauthorized"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
      */
     public function index(Request $request): JsonResponse
@@ -42,6 +46,12 @@ class UserController extends Controller
         if (!Auth::user()->tokenCan('l2') && !Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
+        
+        // --- Normalize boolean query parameters ---
+        $request->merge([
+            'status' => filter_var($request->query('status'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+            'admin'  => filter_var($request->query('admin'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE),
+        ]);
 
         // --- Validation ---
         $validator = Validator::make($request->all(), [
@@ -67,18 +77,29 @@ class UserController extends Controller
 
     /**
      * @OA\Post(
-     * path="/api/v1/users",
-     * summary="Create a new Active Directory user",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\RequestBody(
-     * required=true,
-     * description="User creation data",
-     * @OA\JsonContent(ref="#/components/schemas/CreateUserRequest")
-     * ),
-     * @OA\Response(response=201, description="User created successfully"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=422, description="Validation error")
+     *   path="/api/v1/users",
+     *   summary="Create a new Active Directory user",
+     *   tags={"Users"},
+     *   security={{"sanctum":{}}},
+     *   @OA\RequestBody(
+     *     required=true,
+     *     description="User creation data",
+     *     @OA\JsonContent(
+     *       required={"domain","samAccountName","firstName","lastName"},
+     *       @OA\Property(property="domain", type="string", example="ncc.lab"),
+     *       @OA\Property(property="samAccountName", type="string", example="jdoe"),
+     *       @OA\Property(property="firstName", type="string", example="John"),
+     *       @OA\Property(property="lastName", type="string", example="Doe"),
+     *       @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-05-15"),
+     *       @OA\Property(property="mobileNumber", type="string", example="+966501234567"),
+     *       @OA\Property(property="createAdminAccount", type="boolean", example=false),
+     *       @OA\Property(property="optionalGroupsForStandardUser", type="array", @OA\Items(type="string")),
+     *       @OA\Property(property="optionalGroupsForHighPrivilegeUsers", type="array", @OA\Items(type="string"))
+     *     )
+     *   ),
+     *   @OA\Response(response=201, description="User created successfully"),
+     *   @OA\Response(response=403, description="Unauthorized"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
      */
     public function store(Request $request): JsonResponse
@@ -130,15 +151,15 @@ class UserController extends Controller
 
     /**
      * @OA\Get(
-     * path="/api/v1/users/{samaccountname}",
-     * summary="Get user details",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string"), example="ncc.lab"),
-     * @OA\Response(response=200, description="User details"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
+     *   path="/api/v1/users/{samaccountname}",
+     *   summary="Get a single user by samAccountName",
+     *   tags={"Users"},
+     *   security={{"sanctum": {}}},
+     *   @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string", example="jdoe")),
+     *   @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string", example="ncc.lab")),
+     *   @OA\Response(response=200, description="User details"),
+     *   @OA\Response(response=404, description="User not found"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
      */
     public function show(Request $request, string $samaccountname): JsonResponse
@@ -168,22 +189,28 @@ class UserController extends Controller
     }
 
     /**
-     * @OA\Put(
-     * path="/api/v1/users/{samaccountname}",
-     * summary="Update user details",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(
-     * required=true,
-     * description="User update data",
-     * @OA\JsonContent(ref="#/components/schemas/UpdateUserRequest")
-     * ),
-     * @OA\Response(response=200, description="User updated"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
-     * )
-     */
+    * @OA\Put(
+    * path="/api/v1/users/{samaccountname}",
+    * summary="Update user details",
+    * tags={"Users"},
+    * security={{"sanctum": {}}},
+    * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
+    * @OA\RequestBody(required=true, description="User update data",
+    * @OA\JsonContent(
+    * required={"domain"},
+    * @OA\Property(property="domain", type="string", example="ncc.lab"),
+    * @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-05-15"),
+    * @OA\Property(property="mobileNumber", type="string", example="+966501234567"),
+    * @OA\Property(property="optionalGroups", type="array", @OA\Items(type="string")),
+    * @OA\Property(property="hasAdminAccount", type="boolean")
+    * )
+    * ),
+    * @OA\Response(response=200, description="User updated"),
+    * @OA\Response(response=403, description="Unauthorized"),
+    * @OA\Response(response=404, description="User not found"),
+    * @OA\Response(response=422, description="Validation error")
+    * )
+    */
     public function update(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
@@ -226,25 +253,21 @@ class UserController extends Controller
     
     /**
      * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/enable",
-     * summary="Enable a user account",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(
-     * required=true,
-     * description="Domain of the user",
-     * @OA\JsonContent(
-     * required={"domain"},
-     * @OA\Property(property="domain", type="string", example="ncc.lab")
-     * )
-     * ),
-     * @OA\Response(response=204, description="Account enabled"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
+     *   path="/api/v1/users/{samaccountname}/enable",
+     *   summary="Enable a user account",
+     *   tags={"Users"},
+     *   security={{"sanctum":{}}},
+     *   @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
+     *   @OA\RequestBody(required=true,
+     *     @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
+     *   ),
+    *    @OA\Response(response=200, description="Account enabled"),
+     *   @OA\Response(response=403, description="Unauthorized"),
+     *   @OA\Response(response=404, description="User not found"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
      */
-    public function enable(Request $request, string $samaccountname): JsonResponse
+    public function enableAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
         if (!Auth::user()->tokenCan('l2') && !Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {
@@ -270,25 +293,21 @@ class UserController extends Controller
 
     /**
      * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/disable",
-     * summary="Disable a user account",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(
-     * required=true,
-     * description="Domain of the user",
-     * @OA\JsonContent(
-     * required={"domain"},
-     * @OA\Property(property="domain", type="string", example="ncc.lab")
+     *   path="/api/v1/users/{samaccountname}/disable",
+     *   summary="Disable a user account",
+     *   tags={"Users"},
+     *   security={{"sanctum":{}}},
+     *   @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
+     *   @OA\RequestBody(required=true,
+     *     @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
+     *   ),
+     *   @OA\Response(response=200, description="Account disabled"),
+     *   @OA\Response(response=403, description="Unauthorized"),
+     *   @OA\Response(response=404, description="User not found"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
-     * ),
-     * @OA\Response(response=204, description="Account disabled"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
-     * )
-     */
-    public function disable(Request $request, string $samaccountname): JsonResponse
+     */    
+    public function disableAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
         if (!Auth::user()->tokenCan('l2') && !Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {
@@ -314,25 +333,21 @@ class UserController extends Controller
 
     /**
      * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/unlock",
-     * summary="Unlock a user account",
-     * tags={"User Management"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(
-     * required=true,
-     * description="Domain of the user",
-     * @OA\JsonContent(
-     * required={"domain"},
-     * @OA\Property(property="domain", type="string", example="ncc.lab")
-     * )
-     * ),
-     * @OA\Response(response=204, description="Account unlocked"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found")
+     *   path="/api/v1/users/{samaccountname}/unlock",
+     *   summary="Unlock a user account",
+     *   tags={"Users"},
+     *   security={{"sanctum":{}}},
+     *   @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
+     *   @OA\RequestBody(required=true,
+     *     @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
+     *   ),
+     *   @OA\Response(response=200, description="Account unlocked"),
+     *   @OA\Response(response=403, description="Unauthorized"),
+     *   @OA\Response(response=404, description="User not found"),
+     *   @OA\Response(response=422, description="Validation error")
      * )
      */
-    public function unlock(Request $request, string $samaccountname): JsonResponse
+    public function unlockAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
         if (!Auth::user()->tokenCan('l2') && !Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {

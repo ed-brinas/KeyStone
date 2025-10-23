@@ -97,11 +97,11 @@ class AdService
             $query = $this->newQuery($domain);
             $user = $query->where('samaccountname', '=', $username)->first();
             
-            if ($user) {
-                Log::debug('User found: ' . $user->getFirstAttribute('samaccountname'));
-            } else {
+            if (!$user) {
+                return null;
                 Log::debug('User not found.');
-            }
+            } 
+
             return $user;
 
         } catch (ModelNotFoundException $e) {
@@ -702,6 +702,7 @@ class AdService
     public function getUserDetails(string $domain, string $samAccountName): ?array
     {
         $user = $this->findUserBySamAccountName($samAccountName, $domain);
+
         if (!$user) {
             return null;
         }
@@ -716,8 +717,8 @@ class AdService
             'dateOfBirth' => $user->getFirstAttribute('extensionAttribute1'),
             'mobileNumber' => $user->getFirstAttribute('mobile'),
             'isEnabled' => $user->isEnabled(),
-            'isLockedOut' => $user->isLocked(),
-            'memberOf' => $user->groups()->get()->pluck('samaccountname')->all(),
+            'isLockedOut' => ($user->getFirstAttribute('lockouttime') > 0) ? true : false,
+            'memberOf' => $user->groups()->get()->pluck('samaccountname')->flatten()->all(),
             'hasAdminAccount' => $this->checkIfAdminAccountExists($domain, $samAccountName)
         ];
     }
@@ -739,45 +740,52 @@ class AdService
         $searchOus = config('keystone.provisioning.searchBaseOus', []);
         $domainDn = $this->getBaseDn($domain);
         $formattedOus = array_map(fn($ou) => str_replace('{domain-components}', $domainDn, $ou), $searchOus);
-        
+
+        $users = collect();
+
         if (!empty($formattedOus)) {
-            $query->in($formattedOus);
-        }
+            foreach ($formattedOus as $ou) {
+                $subQuery = clone $query;
+                $subQuery->in($ou);
 
-        // Apply name filter
-        if (!empty($nameFilter)) {
-            $query->where('displayname', 'contains', $nameFilter);
-        }
+                if (!empty($nameFilter)) {
+                    $subQuery->where('displayname', 'contains', $nameFilter);
+                }
 
-        // Apply status filter
-        if ($statusFilter !== null) {
-            if ($statusFilter === true) {
-                $query->whereEnabled(); // LdapRecord helper for enabled
-            } else {
-                $query->whereDisabled(); // LdapRecord helper for disabled
+                if ($statusFilter !== null) {
+                    $statusFilter ? $subQuery->whereEnabled() : $subQuery->whereDisabled();
+                }
+
+                $users = $users->merge($subQuery->paginate(100));
             }
+        } else {
+            // fallback to default query if no OUs configured
+            if (!empty($nameFilter)) {
+                $query->where('displayname', 'contains', $nameFilter);
+            }
+
+            if ($statusFilter !== null) {
+                $statusFilter ? $query->whereEnabled() : $query->whereDisabled();
+            }
+
+            $users = $query->paginate(100);
         }
-        
-        // LdapRecord pagination
-        $users = $query->paginate(100); 
-        
+
+        // Map results
         $userList = [];
         foreach ($users as $user) {
-            // --- FIX: Use getFirstAttribute ---
             $sam = $user->getFirstAttribute('samaccountname');
             $adminExists = $this->checkIfAdminAccountExists($domain, $sam);
 
-            // Apply hasAdminAccount filter
             if ($hasAdminAccount !== null && $adminExists !== $hasAdminAccount) {
                 continue;
             }
 
             $userList[] = [
-                'samAccountName' => $sam,
-                // --- FIX: Use getFirstAttribute ---
-                'displayName' => $user->getFirstAttribute('displayname'),
-                'isEnabled' => $user->isEnabled(),
-                'hasAdminAccount' => $adminExists
+                'samAccountName'  => $sam,
+                'displayName'     => $user->getFirstAttribute('displayname'),
+                'isEnabled'       => $user->isEnabled(),
+                'hasAdminAccount' => $adminExists,
             ];
         }
 
