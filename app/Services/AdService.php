@@ -660,8 +660,17 @@ class AdService
 
         // Update attributes
         // LdapRecord automatically clears attributes if value is null or empty array
-        $user->setAttribute('extensionAttribute1', $data['dateOfBirth'] ?? null);
-        $user->setAttribute('mobile', $data['mobileNumber'] ?? null);
+        //$user->setAttribute('extensionAttribute1', $data['dateOfBirth'] ?? null);
+        //$user->setAttribute('mobile', $data['mobileNumber'] ?? null);
+
+        $user->samaccountname = $data['samAccountName'] ?? null;
+        $user->givenname = $data['firstName'] ?? null;
+        $user->sn = $data['lastName'] ?? null;
+        $user->displayname = $data['firstName'].' '.$data['lastName'] ?? null;
+        $user->userprincipalname = $data['userprincipalname'] ?? null;
+        $user->mail = $data['emailAddress'] ?? null;
+        $user->extensionAttribute1 = $data['dateOfBirth'] ?? null;
+        $user->mobile = $data['mobileNumber'] ?? null;
         $user->save();
 
         // Update standard group memberships

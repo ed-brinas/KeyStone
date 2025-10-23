@@ -238,7 +238,7 @@
                     {
                         "name": "status",
                         "in": "query",
-                        "description": "Enabled status filter (accepts true/false or 1/0)",
+                        "description": "Enabled status filter",
                         "required": false,
                         "schema": {
                             "type": "boolean",
@@ -248,7 +248,7 @@
                     {
                         "name": "admin",
                         "in": "query",
-                        "description": "Has admin account filter (accepts true/false or 1/0)",
+                        "description": "Has admin account filter",
                         "required": false,
                         "schema": {
                             "type": "boolean",
@@ -424,12 +424,27 @@
                         "application/json": {
                             "schema": {
                                 "required": [
-                                    "domain"
+                                    "domain",
+                                    "samAccountName",
+                                    "firstName",
+                                    "lastName"
                                 ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
                                         "example": "ncc.lab"
+                                    },
+                                    "samAccountName": {
+                                        "type": "string",
+                                        "example": "jdoe"
+                                    },
+                                    "firstName": {
+                                        "type": "string",
+                                        "example": "John"
+                                    },
+                                    "lastName": {
+                                        "type": "string",
+                                        "example": "Doe"
                                     },
                                     "dateOfBirth": {
                                         "type": "string",
@@ -440,14 +455,21 @@
                                         "type": "string",
                                         "example": "+966501234567"
                                     },
-                                    "optionalGroups": {
+                                    "createAdminAccount": {
+                                        "type": "boolean",
+                                        "example": false
+                                    },
+                                    "optionalGroupsForStandardUser": {
                                         "type": "array",
                                         "items": {
                                             "type": "string"
                                         }
                                     },
-                                    "hasAdminAccount": {
-                                        "type": "boolean"
+                                    "optionalGroupsForHighPrivilegeUsers": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
                                     }
                                 },
                                 "type": "object"

@@ -115,8 +115,8 @@ class UserController extends Controller
             'samAccountName' => ['required', 'string', 'max:20', 'regex:/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/'],
             'firstName' => ['required', 'string', 'max:50'],
             'lastName' => ['required', 'string', 'max:50'],
-            'dateOfBirth' => ['nullable', 'date_format:Y-m-d'],
-            'mobileNumber' => ['nullable', 'string', 'max:20'],
+            'dateOfBirth' => ['required', 'date_format:Y-m-d'],
+            'mobileNumber' => ['required', 'string', 'max:20'],
             'createAdminAccount' => ['sometimes', 'boolean'],
             'optionalGroupsForStandardUser' => ['sometimes', 'array'],
             'optionalGroupsForStandardUser.*' => ['string'],
@@ -197,12 +197,16 @@ class UserController extends Controller
     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
     * @OA\RequestBody(required=true, description="User update data",
     * @OA\JsonContent(
-    * required={"domain"},
-    * @OA\Property(property="domain", type="string", example="ncc.lab"),
-    * @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-05-15"),
-    * @OA\Property(property="mobileNumber", type="string", example="+966501234567"),
-    * @OA\Property(property="optionalGroups", type="array", @OA\Items(type="string")),
-    * @OA\Property(property="hasAdminAccount", type="boolean")
+    *       required={"domain","samAccountName","firstName","lastName"},
+    *       @OA\Property(property="domain", type="string", example="ncc.lab"),
+    *       @OA\Property(property="samAccountName", type="string", example="jdoe"),
+    *       @OA\Property(property="firstName", type="string", example="John"),
+    *       @OA\Property(property="lastName", type="string", example="Doe"),
+    *       @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-05-15"),
+    *       @OA\Property(property="mobileNumber", type="string", example="+966501234567"),
+    *       @OA\Property(property="createAdminAccount", type="boolean", example=false),
+    *       @OA\Property(property="optionalGroupsForStandardUser", type="array", @OA\Items(type="string")),
+    *       @OA\Property(property="optionalGroupsForHighPrivilegeUsers", type="array", @OA\Items(type="string"))
     * )
     * ),
     * @OA\Response(response=200, description="User updated"),
@@ -218,6 +222,7 @@ class UserController extends Controller
         if (!$user->tokenCan('l2') && !$user->tokenCan('l3') && !$user->tokenCan('domain admins')) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
+
         // If 'hasAdminAccount' is being modified, must have high-privilege
         if ($request->has('hasAdminAccount') && !$user->tokenCan('l3') && !$user->tokenCan('domain admins')) {
             return response()->json(['message' => 'Unauthorized to manage admin accounts.'], 403);
@@ -227,18 +232,23 @@ class UserController extends Controller
         // --- Validation ---
         $validator = Validator::make($request->all(), [
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
-            'dateOfBirth' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
-            'mobileNumber' => ['sometimes', 'nullable', 'string', 'max:20'],
-            'optionalGroups' => ['sometimes', 'array'],
-            'optionalGroups.*' => ['string'],
-            'hasAdminAccount' => ['sometimes', 'boolean'],
+            'samAccountName' => ['required', 'string', 'max:20', 'regex:/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/'],
+            'firstName' => ['required', 'string', 'max:50'],
+            'lastName' => ['required', 'string', 'max:50'],
+            'dateOfBirth' => ['required', 'date_format:Y-m-d'],
+            'mobileNumber' => ['required', 'string', 'max:20'],
+            'createAdminAccount' => ['sometimes', 'boolean'],
+            'optionalGroupsForStandardUser' => ['sometimes', 'array'],
+            'optionalGroupsForStandardUser.*' => ['string'],
+            'optionalGroupsForHighPrivilegeUsers' => ['sometimes', 'array'],
+            'optionalGroupsForHighPrivilegeUsers.*' => ['string'],
         ]);
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
         $data = $validator->validated();
         $domain = $data['domain'];
-        unset($data['domain']); // Don't pass domain to updateUser method
+        unset($data['domain']);        
         // --- End Validation ---
 
         try {
