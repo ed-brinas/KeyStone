@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use Carbon\Carbon;
 use LdapRecord\Container;
 use LdapRecord\LdapRecordException;
 use LdapRecord\Connection;
@@ -94,7 +93,9 @@ class AdService
     public function findUserBySamAccountName(string $username, string $domain): ?LdapUser
     {
         Log::debug("Attempting to find user by sAMAccountName: {$username}");
+
         try {
+
             $query = $this->newQuery($domain);
             $user = $query->where('samaccountname', '=', $username)->first();
 
@@ -116,76 +117,89 @@ class AdService
 
     /**
      * Get the AD roles for a given AD user based on keystone config.
-     * Returns full Distinguished Names (DNs) of authorized groups.
+     * User must be a member of *either* a general OR a high privilege group to get access.
      *
-     * @param  \LdapRecord\Models\ActiveDirectory\User  $user
-     * @param  string  $domain
+     * @param LdapUser $user
+     * @param string $domain
      * @return array
      */
-    public function getRolesForUser($adUser, string $domain): array
+    public function getRolesForUser(LdapUser $user, string $domain): array
     {
-        try {
-            // Step 1: Retrieve AD group DNs
-            $rawGroups = $adUser->groups()->get()->pluck('distinguishedname')->toArray();
+        $generalAccessGroups = config('keystone.applicationAccessControl.generalAccessGroups', []);
+        $highPrivilegeGroups = config('keystone.applicationAccessControl.highPrivilegeGroups', []);
 
-            $userGroups = collect($rawGroups)
-                ->flatten()
-                ->filter(fn($g) => is_string($g) && !empty($g))
-                ->map(fn($g) => strtolower(trim($g)))
-                ->unique()
-                ->values()
-                ->toArray();
+        $userRoles = [];
+        $hasGeneralAccess = false;
+        $hasHighPrivilegeAccess = false;
 
-            // Step 2: Use the helper to get DN-form domain components
-            $baseDn = $this->getBaseDn($domain);
+        $domainDn = $this->getBaseDn($domain);
+        Log::debug("Role Check: Base DN created: '{$domainDn}'");
 
-            // Step 3: Build final expected groups from keystone.php
-            $accessControl = config('keystone.applicationAccessControl');
+        // Get all of the user's AD groups (reads the 'memberOf' attribute)
+        $userGroups = $user->groups()->get();
+        Log::debug("Role Check: User '{$user->getFirstAttribute('samaccountname')}' is a member of " . count($userGroups) . " groups.");
 
-            $generalAccessGroups = [];
-            $highPrivilegeGroups = [];
+        foreach ($userGroups as $group) {
+            $groupName = $group->getFirstAttribute('samaccountname');
+            $groupDn = $group->getDn();
+            if (empty($groupName) || empty($groupDn)) continue;
 
-            if (isset($accessControl['generalAccessGroups'])) {
-                $generalAccessGroups = array_map(
-                    fn($g) => strtolower(str_replace('{domain-components}', $baseDn, $g)),
-                    $accessControl['generalAccessGroups']
-                );
+            Log::debug("Role Check: Processing group '{$groupName}' with DN '{$groupDn}'");
+
+            $isAccessGroup = false;
+
+            // Check if this group is a General Access group
+            foreach ($generalAccessGroups as $configGroup) {
+                $formattedConfigGroup = str_replace('{domain-components}', $domainDn, $configGroup);
+                Log::debug("Role Check: Comparing (General) '{$groupDn}' (User) VS '{$formattedConfigGroup}' (Config)");
+                if (strcasecmp($groupDn, $formattedConfigGroup) === 0) {
+                    Log::debug("Role Check: MATCH! User has General Access via '{$groupName}'");
+                    $hasGeneralAccess = true;
+                    $isAccessGroup = true;
+                    break;
+                }
             }
 
-            if (isset($accessControl['highPrivilegeGroups'])) {
-                $highPrivilegeGroups = array_map(
-                    fn($g) => strtolower(str_replace('{domain-components}', $baseDn, $g)),
-                    $accessControl['highPrivilegeGroups']
-                );
+            // Check if this group is a High Privilege group (only if not already found in general)
+            if (!$isAccessGroup) {
+                foreach ($highPrivilegeGroups as $configGroup) {
+                    $formattedConfigGroup = str_replace('{domain-components}', $domainDn, $configGroup);
+                    Log::debug("Role Check: Comparing (High) '{$groupDn}' (User) VS '{$formattedConfigGroup}' (Config)");
+                    if (strcasecmp($groupDn, $formattedConfigGroup) === 0) {
+                        Log::debug("Role Check: MATCH! User has High Privilege Access via '{$groupName}'");
+                        $hasHighPrivilegeAccess = true;
+                        $isAccessGroup = true;
+                        break;
+                    }
+                }
             }
 
-            // Step 4: Match user’s AD group DNs with config
-            $hasGeneralAccess = count(array_intersect($userGroups, $generalAccessGroups)) > 0;
-            $hasHighPrivilegeAccess = count(array_intersect($userGroups, $highPrivilegeGroups)) > 0;
-
-            Log::info('User group evaluation', [
-                'domain' => $domain,
-                'baseDn' => $baseDn,
-                'userGroups' => $userGroups,
-                'generalAccessGroups' => $generalAccessGroups,
-                'highPrivilegeGroups' => $highPrivilegeGroups,
-                'hasGeneralAccess' => $hasGeneralAccess,
-                'hasHighPrivilegeAccess' => $hasHighPrivilegeAccess,
-            ]);
-
-            return [
-                'roles' => $userGroups,
-                'hasGeneralAccess' => $hasGeneralAccess,
-                'hasHighPrivilegeAccess' => $hasHighPrivilegeAccess,
-            ];
-        } catch (\Exception $e) {
-            Log::error("Failed to determine roles for AD user: " . $e->getMessage());
-            return [
-                'roles' => [],
-                'hasGeneralAccess' => false,
-                'hasHighPrivilegeAccess' => false,
-            ];
+            // NOW, if it was an access group, add its name to the roles list
+            if ($isAccessGroup) {
+                // We no longer check Spatie, just add the AD group name
+                // NORMALIZE TO LOWERCASE
+                $userRoles[] = strtolower($groupName);
+                Log::debug("Role Check: Added AD Group '{$groupName}' (normalized) to token abilities.");
+            }
         }
+
+        // Per requirement: user MUST be part of *either* general OR high privilege groups
+        Log::debug("Role Check: Final decision: hasGeneralAccess=($hasGeneralAccess), hasHighPrivilegeAccess=($hasHighPrivilegeAccess)");
+        if ($hasGeneralAccess || $hasHighPrivilegeAccess) {
+            // Add 'default' role if it's not there
+            if (!in_array('default', $userRoles)) {
+                 $userRoles[] = 'default';
+                 Log::debug("Role Check: Added 'default' role.");
+            }
+
+            Log::debug("Role Check: Access GRANTED. Roles: " . implode(', ', $userRoles));
+            return array_unique($userRoles);
+        }
+
+        // If requirement is not met, return no roles.
+        // This will cause the login to fail in AuthController.
+        Log::warning("User '{$user->getFirstAttribute('samaccountname')}' login denied. Does not meet General OR High Privilege group requirements.");
+        return [];
     }
 
     // --- END STABLE METHODS ---
@@ -279,6 +293,7 @@ class AdService
             $password .= $allChars[random_int(0, strlen($allChars) - 1)];
         }
 
+        // --- FIX: Use str_shuffle instead of Str::shuffle ---
         return str_shuffle($password);
     }
 
@@ -315,33 +330,28 @@ class AdService
     }
 
     /**
-     * Add a user to a specified Active Directory group.
+     * Add a user to a security group.
      *
-     * @param string $domain
      * @param LdapUser $user
      * @param string $groupName
-     * @return bool
+     * @param string $domain
+     * @return void
      */
-    protected function addUserToGroup(string $domain, LdapUser $user, string $groupName): bool
+    public function addUserToGroup(LdapUser $user, string $groupName, string $domain): void
     {
         try {
-            $group = LdapGroup::on($domain)
-                ->where('samaccountname', '=', $groupName)
-                ->first();
-
+            $group = $this->findGroupByName($groupName, $domain);
             if ($group) {
-                $group->members()->attach($user);
-                Log::info("Added '{$user->getName()}' to group '{$groupName}'.");
-                return true;
+                $user->groups()->attach($group);
+                // --- FIX: Use getFirstAttribute ---
+                Log::info("Added user '{$user->getFirstAttribute('samaccountname')}' to group '{$groupName}'.");
+            } else {
+                Log::warning("Could not add user to group. Group '{$groupName}' not found in domain '{$domain}'.");
             }
-
-            Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
-
         } catch (\Exception $e) {
-            Log::error("Failed to add '{$user->getName()}' to group '{$groupName}': " . $e->getMessage());
+            // --- FIX: Use getFirstAttribute ---
+            Log::error("Failed to add user '{$user->getFirstAttribute('samaccountname')}' to group '{$groupName}': " . $e->getMessage());
         }
-
-        return false;
     }
 
     /**
@@ -352,25 +362,21 @@ class AdService
      * @param string $domain
      * @return void
      */
-    protected function removeUserFromGroup(string $domain, LdapUser $user, string $groupName): bool
+    public function removeUserFromGroup(LdapUser $user, string $groupName, string $domain): void
     {
         try {
-            $group = LdapGroup::on($domain)
-                ->where('samaccountname', '=', $groupName)
-                ->first();
-
-            if ($group && $group->members()->exists($user)) {
-                $group->members()->detach($user);
-                Log::info("Removed '{$user->getName()}' from group '{$groupName}'.");
-                return true;
+            $group = $this->findGroupByName($groupName, $domain);
+            if ($group) {
+                $user->groups()->detach($group);
+                // --- FIX: Use getFirstAttribute ---
+                Log::info("Removed user '{$user->getFirstAttribute('samaccountname')}' from group '{$groupName}'.");
+            } else {
+                Log::warning("Could not remove user from group. Group '{$groupName}' not found in domain '{$domain}'.");
             }
-
-            Log::debug("Group '{$groupName}' not found or user '{$user->getName()}' not a member.");
         } catch (\Exception $e) {
-            Log::error("Failed to remove '{$user->getName()}' from group '{$groupName}': " . $e->getMessage());
+            // --- FIX: Use getFirstAttribute ---
+            Log::error("Failed to remove user '{$user->getFirstAttribute('samaccountname')}' from group '{$groupName}': " . $e->getMessage());
         }
-
-        return false;
     }
 
     /**
@@ -411,135 +417,107 @@ class AdService
      */
     public function createUser(array $data): array
     {
-        Log::debug('User provisioning data:', $data);
+        $domain = $data['domain'];
+        $sam = $data['samAccountName'];
+        $cn = $data['firstName'] . ' ' . $data['lastName'];
+        $isPrivileged = $data['createAdminAccount'] ?? false;
 
-        $domain         = $data['domain'];
-        $cn             = Str::title($data['firstName'])." ".Str::title($data['lastName']);
-        $dn             = $this->buildDn($cn, $domain, false);
+        Log::info("Attempting to create user '{$sam}' in domain '{$domain}'. IsPrivileged: " . ($isPrivileged ? 'Yes' : 'No'));
 
         try {
-
-            // 1. Build DN and create base user object
-            $user                       = new LdapUser;
-            $user->cn                   = $cn;
-            $user->samaccountname       = $data['badgeNumber'];
-            $user->userprincipalname    = $data['badgeNumber'].'@'.$domain;
-            $user->displayname          = $cn;
-            $user->givenname            = Str::title($data['firstName']);
-            $user->sn                   = Str::title($data['lastName']);
-            $user->info                 = $data['dateOfBirth'];
-            $user->mail                 = $data['badgeNumber'].'@'.$domain;
-            $user->mobile               = $data['mobileNumber'];
-            $user->useraccountcontrol   = 544;
-            $user->accountExpires       = strtotime($data['badgeExpirationDate']);
+            // --- 1. Create minimal user object ---
+            $dn = $this->buildDn($cn, $domain, $isPrivileged);
+            $user = new LdapUser();
+            $user->setConnection($domain);
             $user->setDn($dn);
+
+            $user->setAttribute('cn', $cn);
+            $user->setAttribute('samaccountname', $sam);
+            $user->setAttribute('sn', $data['lastName']);
+            $user->setAttribute('givenname', $data['firstName']);
+            $user->setAttribute('displayname', $cn);
+            $user->setAttribute('userprincipalname', "{$sam}@{$domain}");
+            $user->setAttribute('objectClass', ['top', 'person', 'organizationalPerson', 'user']);
+            $user->setAttribute('userAccountControl', 544); // Disabled account
+
             $user->save();
+            Log::info("LDAP: Created minimal user object '{$sam}' successfully.");
 
-            Log::info("LDAP: Created minimal user object '{$cn}' successfully.");
-
-            // Reload the user entry before resetting its password to ensure replication completion:
-            sleep(1);
+            // --- 2. Add optional attributes (safe) ---
             $user->refresh();
+            $attributes = [];
 
-            // 2. Generate password
-            $initialPassword = $this->generatePassword();
-            $this->resetPassword($user, $initialPassword, true);
-
-            // 3. Add to groups
-            foreach (($data['optionalGroupsForStandardUser'] ?? []) as $groupName) {
-
-                try {
-
-                    $group = LdapGroup::on($domain)->where('samaccountname', '=', $groupName)->first();
-
-                    if ($group) {
-
-                        $group->members()->attach($user);
-
-                        Log::info("Added user '{$cn}' to group '{$groupName}'");
-                    }
-                } catch (\Exception $e) {
-                    Log::error("Group attach error for '{$cn}' → '{$groupName}': " . $e->getMessage());
-                }
+            if (!empty($data['mobileNumber'])) {
+                $attributes['mobile'] = $data['mobileNumber'];
+            }
+            if (!empty($data['email'])) {
+                $attributes['mail'] = $data['email'];
             }
 
-            /*
-            // 5. Optional admin account
-            $adminAccountData = null;
-            if ($data['createAdminAccount'] === true) {
-                $adminAccountData = $this->createAdminUser($domain, $data);
-            }
-            */
-
-            return [
-                'user' => $user ?? null,
-                'password' => $initialPassword ?? null,
-                'adminAccount' => $adminAccountData ?? null,
-            ];
-
-        } catch (\Exception $e) {
-            Log::error('User creation failed: ' . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    /**
-     * Update a user's details.
-     *
-     * @param string $domain
-     * @param string $samAccountName
-     * @param array $data Validated data from UpdateUserRequest
-     * @return LdapUser
-     */
-    public function updateUser(array $data): array
-    {
-        $domain         = $data['domain'];
-        $sam            = $data['badgeNumber'];
-        $cn             = "{$data['firstName']} {$data['lastName']}";
-        $isPrivileged   = !empty($data['createAdminAccount']);
-
-        Log::info("Updating AD user '{$sam}' in domain '{$domain}'");
-
-        try {
-            $user = $this->findUserBySamAccountName($sam, $domain);
-            if (!$user) {
-                throw new \Exception("User '{$sam}' not found in domain '{$domain}'.");
-            }
-
-            $updates = [
-                'displayName' => Str::title($cn),
-                'givenName' => Str::title($data['firstName']),
-                'sn' => Str::title($data['lastName']),
-                'info' => $data['dateOfBirth'],
-                'mail' => "{$data['badgeNumber']}@{$domain}",
-                'mobile' => $data['mobileNumber'],
-                'accountExpires' => strtotime($data['badgeExpirationDate']),
-            ];
-
-            foreach ($updates as $attr => $value) {
+            foreach ($attributes as $attr => $value) {
                 try {
                     $user->setAttribute($attr, $value);
-                } catch (\Exception $e) {
-                    Log::warning("Failed updating attribute '{$attr}' for '{$sam}': " . $e->getMessage());
+                    $user->save();
+                    Log::info("Set optional attribute '{$attr}' for '{$sam}'.");
+                } catch (\Exception $ex) {
+                    Log::warning("Could not set attribute '{$attr}' for '{$sam}': " . $ex->getMessage());
                 }
             }
 
-            $user->save();
-            Log::info("User '{$sam}' updated successfully.");
-
-            // Update admin account if applicable
-            if ($isPrivileged) {
-                $adminData = $this->checkIfAdminAccountExists($domain, $sam)
-                    ? $this->updateAdminUser($domain, $data)
-                    : $this->createAdminUser($domain, $data);
+            // --- 3. Set password and enable ---
+            $initialPassword = $this->generatePassword();
+            try {
+                $this->resetPassword($user, $initialPassword, true);
+                $user->setAttribute('userAccountControl', 512); // Normal account
+                $user->save();
+                Log::info("Password set and account enabled for '{$sam}'.");
+            } catch (\Exception $e) {
+                Log::error("Failed to reset password for '{$sam}': " . $e->getMessage());
+                throw new \Exception("Password reset failed: " . $e->getMessage());
             }
 
-            return ['user' => $user];
+            // --- 4. Group membership handling (safe existence check) ---
+            $optionalGroups = $data['optionalGroupsForStandardUser'] ?? [];
+            foreach ($optionalGroups as $groupName) {
+                try {
+                    $group = LdapGroup::on($domain)
+                        ->where('samaccountname', '=', $groupName)
+                        ->first(); // Get actual model instance
+
+                    if (!$group) {
+                        Log::warning("Group '{$groupName}' not found in domain '{$domain}'. Skipping...");
+                        continue;
+                    }
+
+                    $group->members()->attach($user);
+                    Log::info("Added user '{$sam}' to group '{$groupName}' successfully.");
+
+                } catch (\LdapRecord\Exceptions\LdapException $ex) {
+                    Log::error("Failed to add user '{$sam}' to group '{$groupName}': " . $ex->getMessage());
+                } catch (\Exception $ex) {
+                    Log::error("Unexpected error adding '{$sam}' to '{$groupName}': " . $ex->getMessage());
+                }
+            }
+
+            // --- 5. Privileged account (if needed) ---
+            $adminAccountData = null;
+            if ($isPrivileged) {
+                $adminAccountData = $this->createAdminAccount($domain, $data);
+            }
+
+            return [
+                'user' => $user,
+                'password' => $initialPassword,
+                'adminAccount' => $adminAccountData
+            ];
+
+        } catch (\LdapRecord\Exceptions\LdapException $e) {
+            Log::error("LDAP error creating user '{$sam}': " . $e->getMessage());
+            throw new \Exception("LDAP error: " . $e->getMessage());
         } catch (\Exception $e) {
-            Log::error("Failed to update AD user '{$sam}': " . $e->getMessage());
+            Log::error("Failed to create user '{$sam}': " . $e->getMessage());
             throw $e;
         }
-
     }
 
     /**
@@ -555,138 +533,61 @@ class AdService
     }
 
     /**
-     * Create a new privileged (admin) Active Directory user account.
+     * Create a privileged admin account.
      *
      * @param string $domain
      * @param array $baseRequestData
      * @return array
      */
-    public function createAdminUser(string $domain, array $data): array
+    public function createAdminAccount(string $domain, array $baseRequestData): array
     {
-        $baseSam    = $data['badgeNumber'];
-        $adminSam   = "{$baseSam}-a";
-        $cn         = "admin-{$data['firstName']}{$data['lastName']}";
-
-        Log::info("Creating admin account '{$adminSam}' in domain '{$domain}'");
+        $adminSam = "{$baseRequestData['samAccountName']}-a";
+        Log::info("Creating admin account '{$adminSam}' in domain '{$domain}'.");
 
         try {
-
-            if ($this->checkIfAdminAccountExists($domain, $baseSam)) {
-                Log::info("Admin account '{$adminSam}' already exists, skipping creation.");
-                return [];
-            }
-
-            $dn = $this->buildDn($cn, $domain, true);
+            // --- FIX: Use new LdapUser() and setConnection ---
             $adminUser = new LdapUser();
             $adminUser->setConnection($domain);
+
+            // Build DN using the privileged OU
+            $dn = $this->buildDn($baseRequestData['firstName'] . ' ' . $baseRequestData['lastName'] . ' (Admin)', $domain, true);
             $adminUser->setDn($dn);
 
-            $attributes = [
-                'cn' => $cn,
-                'displayName' => "admin-" . strtolower($data['firstName'] . $data['lastName']),
-                'givenName' => $data['firstName'],
-                'sn' => $data['lastName'],
-                'mail' => "{$baseSam}-a@{$domain}",
-                'mobile' => $data['mobileNumber'],
-                'name' => "admin-" . strtolower($data['firstName'] . $data['lastName']),
-                'sAMAccountName' => $adminSam,
-                'userPrincipalName' => "{$adminSam}@{$domain}",
-                'userAccountControl' => 512,
-                'accountExpires' => Carbon::now()->addMonth()->timestamp,
+            $adminUser->setAttribute('samaccountname', $adminSam);
+            $adminUser->setAttribute('displayname', $baseRequestData['firstName'] . ' ' . $baseRequestData['lastName'] . ' (Admin)');
+            $adminUser->setAttribute('userprincipalname', $adminSam . '@' . $domain);
+            $adminUser->setAttribute('userAccountControl', 512); // 512 = Normal Account
+
+            $adminPassword = $this->generatePassword();
+            $this->resetPassword($adminUser, $adminPassword, true);
+
+            // Add to privileged groups
+            $privilegeGroups = $baseRequestData['optionalGroupsForHighPrivilegeUsers'] ?? [];
+
+            // Set Primary Group (if groups are provided)
+            if (!empty($privilegeGroups)) {
+                $firstGroup = $this->findGroupByName($privilegeGroups[0], $domain);
+                if ($firstGroup) {
+                    $adminUser->setPrimaryGroup($firstGroup);
+                    // --- FIX: Use getFirstAttribute ---
+                    Log::info("Set primary group for '{$adminSam}' to '{$firstGroup->getFirstAttribute('samaccountname')}'.");
+                }
+            }
+
+            // Add to all specified privilege groups
+            foreach ($privilegeGroups as $groupName) {
+                $this->addUserToGroup($adminUser, $groupName, $domain);
+            }
+
+            // Remove from 'Domain Users'
+            $this->removeUserFromGroup($adminUser, 'Domain Users', $domain);
+
+            return [
+                'samAccountName' => $adminSam,
+                'initialPassword' => $adminPassword
             ];
-
-            foreach ($attributes as $attr => $value) {
-                $adminUser->setAttribute($attr, $value);
-            }
-
-            $adminUser->save();
-
-            $password = $this->generatePassword();
-            $this->resetPassword($adminUser, $password, true);
-
-            foreach (($data['optionalGroupsForHighPrivilegeUsers'] ?? []) as $groupName) {
-                try {
-                    $group = LdapGroup::on($domain)->where('samaccountname', '=', $groupName)->first();
-                    if ($group) {
-                        $group->members()->attach($adminUser);
-                        Log::info("Added admin '{$adminSam}' to group '{$groupName}'");
-                    }
-                } catch (\Exception $e) {
-                    Log::error("Failed adding '{$adminSam}' to group '{$groupName}': " . $e->getMessage());
-                }
-            }
-
-            // --- Remove from default 'Domain Users' group using helper ---
-            $this->removeUserFromGroup($domain, $adminUser, 'Domain Users');
-
-            return ['user' => $adminUser, 'initialPassword' => $password];
         } catch (\Exception $e) {
-            Log::error("Failed to create admin user '{$adminSam}': " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    /**
-     *  Update an existing privileged (admin) Active Directory user account.
-     *
-     * @param string $domain
-     * @param string $samAccountName
-     * @param array $data Validated data from UpdateUserRequest
-     * @return LdapUser
-     */
-    public function updateAdminUser(string $domain, array $data): array
-    {
-        $baseSam = $data['badgeNumber'];
-        $adminSam = "{$baseSam}-a";
-        $cn = "admin-{$data['firstName']}{$data['lastName']}";
-
-        Log::info("Updating admin account '{$adminSam}' in domain '{$domain}'");
-
-        try {
-            $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
-            if (!$adminUser) {
-                throw new \Exception("Admin user '{$adminSam}' not found.");
-            }
-
-            $updates = [
-                'displayName' => "admin-" . strtolower($data['firstName'] . $data['lastName']),
-                'givenName' => $data['firstName'],
-                'sn' => $data['lastName'],
-                'mail' => "{$baseSam}-a@{$domain}",
-                'mobile' => $data['mobileNumber'],
-                'accountExpires' => Carbon::now()->addMonth()->timestamp,
-            ];
-
-            foreach ($updates as $attr => $value) {
-                try {
-                    $adminUser->setAttribute($attr, $value);
-                } catch (\Exception $e) {
-                    Log::warning("Failed updating attribute '{$attr}' for '{$adminSam}': " . $e->getMessage());
-                }
-            }
-
-            $adminUser->save();
-
-            // Update group memberships
-            foreach (($data['optionalGroupsForHighPrivilegeUsers'] ?? []) as $groupName) {
-                try {
-                    $group = LdapGroup::on($domain)->where('samaccountname', '=', $groupName)->first();
-                    if ($group) {
-                        $group->members()->syncWithoutDetaching([$adminUser]);
-                        Log::info("Updated group membership for '{$adminSam}' in '{$groupName}'");
-                    }
-                } catch (\Exception $e) {
-                    Log::error("Group update failed for '{$adminSam}' in '{$groupName}': " . $e->getMessage());
-                }
-            }
-
-            // --- Remove from default 'Domain Users' group using helper ---
-            $this->removeUserFromGroup($domain, $adminUser, 'Domain Users');
-
-            return ['user' => $adminUser];
-
-        } catch (\Exception $e) {
-            Log::error("Failed to update admin user '{$adminSam}': " . $e->getMessage());
+            Log::error("Failed to create admin account '{$adminSam}': " . $e->getMessage());
             throw $e;
         }
     }
@@ -742,7 +643,65 @@ class AdService
         }
     }
 
+    /**
+     * Update a user's details.
+     *
+     * @param string $domain
+     * @param string $samAccountName
+     * @param array $data Validated data from UpdateUserRequest
+     * @return LdapUser
+     */
+    public function updateUser(string $domain, string $samAccountName, array $data): LdapUser
+    {
+        $user = $this->findUserBySamAccountName($samAccountName, $domain);
+        if (!$user) {
+            throw new ModelNotFoundException("User '{$samAccountName}' not found.");
+        }
 
+        Log::info("Updating user '{$samAccountName}' in domain '{$domain}'.");
+
+        // Update attributes
+        // LdapRecord automatically clears attributes if value is null or empty array
+        //$user->setAttribute('extensionAttribute1', $data['dateOfBirth'] ?? null);
+        //$user->setAttribute('mobile', $data['mobileNumber'] ?? null);
+
+        $user->samaccountname = $data['samAccountName'] ?? null;
+        $user->givenname = $data['firstName'] ?? null;
+        $user->sn = $data['lastName'] ?? null;
+        $user->displayname = $data['firstName'].' '.$data['lastName'] ?? null;
+        $user->userprincipalname = $data['userprincipalname'] ?? null;
+        $user->mail = $data['emailAddress'] ?? null;
+        $user->extensionAttribute1 = $data['dateOfBirth'] ?? null;
+        $user->mobile = $data['mobileNumber'] ?? null;
+        $user->save();
+
+        // Update standard group memberships
+        $standardGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
+        $this->updateGroupMembership($user, $domain, $data['optionalGroups'] ?? [], $standardGroups);
+
+        // Handle admin account creation/disabling
+        $adminExists = $this->checkIfAdminAccountExists($domain, $samAccountName);
+
+        if (isset($data['hasAdminAccount'])) {
+            if ($data['hasAdminAccount'] && !$adminExists) {
+                // Create admin account
+                Log::info("UpdateUser: Creating admin account for '{$samAccountName}'.");
+                $adminData = [
+                    'samAccountName' => $samAccountName,
+                    'firstName' => $user->getFirstAttribute('givenname'),
+                    'lastName' => $user->getFirstAttribute('sn'),
+                    'optionalGroupsForHighPrivilegeUsers' => config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', [])
+                ];
+                $this->createAdminAccount($domain, $adminData);
+            } elseif (!$data['hasAdminAccount'] && $adminExists) {
+                // Disable admin account
+                Log::info("UpdateUser: Disabling admin account for '{$samAccountName}'.");
+                $this.disableAdminAccount($domain, "{$samAccountName}-a");
+            }
+        }
+
+        return $user;
+    }
 
     /**
      * Get details for a single user.
@@ -925,7 +884,4 @@ class AdService
             Log::info("Enabled account for '{$samAccountName}'.");
         }
     }
-
-
-
 }

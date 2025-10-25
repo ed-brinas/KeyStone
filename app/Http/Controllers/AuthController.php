@@ -90,11 +90,12 @@ class AuthController extends Controller
 
             // 3. Find or create the local user
             $user = User::updateOrCreate(
-                ['username' => $adUser->getFirstAttribute('samaccountname')],
+                [   'email' => $adUser->getFirstAttribute('mail') ?? $username.'@'.$domain ],
                 [
                     'name' => $adUser->getFirstAttribute('displayname'),
-                    'email' => $adUser->getFirstAttribute('mail') ?? $username.'@'.$domain, 
-                    'password' => Hash::make(Str::random(40))
+                    'password' => Hash::make(Str::random(40)),
+                    'hasGeneralAccess' => $roles['hasGeneralAccess'],
+                    'hasHighPrivilegeAccess' => $roles['hasHighPrivilegeAccess'],
                 ]
             );
 
@@ -131,4 +132,3 @@ class AuthController extends Controller
         return response()->json([], 204);
     }
 }
-

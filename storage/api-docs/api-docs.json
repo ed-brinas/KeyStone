@@ -278,44 +278,52 @@
                     "Users"
                 ],
                 "summary": "Create a new Active Directory user",
+                "description": "Creates a new user in the specified domain.\n    *     - User managers can create standard users (saved under provisioning->ouStandardUser).\n    *     - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).\n    *     - Optional groups can be assigned from configuration lists.\n    *   ",
                 "operationId": "ba548b97148bb5c0d8cab3bc3f128bfd",
                 "requestBody": {
-                    "description": "User creation data",
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "required": [
                                     "domain",
-                                    "samAccountName",
+                                    "badgeNumber",
                                     "firstName",
-                                    "lastName"
+                                    "lastName",
+                                    "mobileNumber",
+                                    "dateOfBirth",
+                                    "badgeExpirationDate"
                                 ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
-                                        "example": "ncc.lab"
+                                        "example": "corp.example.com"
                                     },
-                                    "samAccountName": {
+                                    "badgeNumber": {
                                         "type": "string",
-                                        "example": "jdoe"
+                                        "example": "987654"
                                     },
                                     "firstName": {
                                         "type": "string",
-                                        "example": "John"
+                                        "example": "Jane"
                                     },
                                     "lastName": {
                                         "type": "string",
-                                        "example": "Doe"
+                                        "example": "Smith"
+                                    },
+                                    "mobileNumber": {
+                                        "type": "string",
+                                        "example": "+15559876543"
                                     },
                                     "dateOfBirth": {
                                         "type": "string",
                                         "format": "date",
-                                        "example": "1990-05-15"
+                                        "example": "1990-01-25"
                                     },
-                                    "mobileNumber": {
+                                    "badgeExpirationDate": {
                                         "type": "string",
-                                        "example": "+966501234567"
+                                        "format": "date",
+                                        "example": "2026-12-31"
                                     },
                                     "createAdminAccount": {
                                         "type": "boolean",
@@ -324,13 +332,15 @@
                                     "optionalGroupsForStandardUser": {
                                         "type": "array",
                                         "items": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "example": "Finance-Users"
                                         }
                                     },
                                     "optionalGroupsForHighPrivilegeUsers": {
                                         "type": "array",
                                         "items": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "example": "Domain-Admins"
                                         }
                                     }
                                 },
@@ -341,18 +351,93 @@
                 },
                 "responses": {
                     "201": {
-                        "description": "User created successfully"
+                        "description": "User created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "User created successfully."
+                                        },
+                                        "username": {
+                                            "type": "string",
+                                            "example": "jsmith"
+                                        },
+                                        "initial_password": {
+                                            "type": "string",
+                                            "example": "TempP@ss123!"
+                                        },
+                                        "admin_account_username": {
+                                            "type": "string",
+                                            "example": "jsmith-admin"
+                                        },
+                                        "admin_initial_password": {
+                                            "type": "string",
+                                            "example": "Adm1nP@ss!"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     },
                     "403": {
-                        "description": "Unauthorized"
+                        "description": "Unauthorized action or insufficient privileges",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized to create admin accounts."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     },
                     "422": {
-                        "description": "Validation error"
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "errors": {
+                                            "type": "object",
+                                            "example": {
+                                                "mobileNumber": [
+                                                    "The mobileNumber field is required."
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to create user: LDAP connection failed"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
                     {
-                        "sanctum": []
+                        "bearerAuth": []
                     }
                 ]
             }
@@ -411,32 +496,36 @@
                     {
                         "name": "samaccountname",
                         "in": "path",
+                        "description": "The user's SAM account name (AD username)",
                         "required": true,
                         "schema": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "jdoe"
                         }
                     }
                 ],
                 "requestBody": {
-                    "description": "User update data",
                     "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "required": [
                                     "domain",
-                                    "samAccountName",
+                                    "badgeNumber",
                                     "firstName",
-                                    "lastName"
+                                    "lastName",
+                                    "mobileNumber",
+                                    "dateOfBirth",
+                                    "badgeExpirationDate"
                                 ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
-                                        "example": "ncc.lab"
+                                        "example": "corp.example.com"
                                     },
-                                    "samAccountName": {
+                                    "badgeNumber": {
                                         "type": "string",
-                                        "example": "jdoe"
+                                        "example": "123456"
                                     },
                                     "firstName": {
                                         "type": "string",
@@ -446,14 +535,19 @@
                                         "type": "string",
                                         "example": "Doe"
                                     },
+                                    "mobileNumber": {
+                                        "type": "string",
+                                        "example": "+15551234567"
+                                    },
                                     "dateOfBirth": {
                                         "type": "string",
                                         "format": "date",
-                                        "example": "1990-05-15"
+                                        "example": "1985-06-15"
                                     },
-                                    "mobileNumber": {
+                                    "badgeExpirationDate": {
                                         "type": "string",
-                                        "example": "+966501234567"
+                                        "format": "date",
+                                        "example": "2026-06-15"
                                     },
                                     "createAdminAccount": {
                                         "type": "boolean",
@@ -462,13 +556,15 @@
                                     "optionalGroupsForStandardUser": {
                                         "type": "array",
                                         "items": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "example": "IT-Support"
                                         }
                                     },
                                     "optionalGroupsForHighPrivilegeUsers": {
                                         "type": "array",
                                         "items": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "example": "Domain-Admins"
                                         }
                                     }
                                 },
@@ -479,21 +575,93 @@
                 },
                 "responses": {
                     "200": {
-                        "description": "User updated"
+                        "description": "User updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "User updated successfully."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     },
                     "403": {
-                        "description": "Unauthorized"
+                        "description": "Unauthorized action",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "This action is unauthorized."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     },
                     "404": {
-                        "description": "User not found"
+                        "description": "User not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "User not found."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     },
                     "422": {
-                        "description": "Validation error"
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "errors": {
+                                            "type": "object",
+                                            "example": {
+                                                "badgeNumber": [
+                                                    "The badgeNumber field is required."
+                                                ]
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to update user: Unexpected error"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
                     {
-                        "sanctum": []
+                        "bearerAuth": []
                     }
                 ]
             }
