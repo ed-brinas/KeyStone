@@ -73,82 +73,82 @@ class UserController extends Controller
         return response()->json($users);
     }
 
-    /**
+/**
     * @OA\Post(
-    *   path="/api/v1/users",
-    *   summary="Create a new Active Directory user",
-    *   description="Creates a new user in the specified domain.
-    *     - User managers can create standard users (saved under provisioning->ouStandardUser).
-    *     - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).
-    *     - Optional groups can be assigned from configuration lists.
-    *   ",
-    *   tags={"Users"},
+    * path="/api/v1/users",
+    * summary="Create a new Active Directory user",
+    * description="Creates a new user in the specified domain.
+    * - User managers can create standard users (saved under provisioning->ouStandardUser).
+    * - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).
+    * - Optional groups can be assigned from configuration lists.
+    * ",
+    * tags={"Users"},
     *
-    *     @OA\RequestBody(
-    *         required=true,
-    *         @OA\JsonContent(
-    *             required={
-    *                 "domain", "badgeNumber", "firstName", "lastName",
-    *                 "mobileNumber", "dateOfBirth", "badgeExpirationDate"
-    *             },
-    *             @OA\Property(property="domain", type="string", example="corp.example.com"),
-    *             @OA\Property(property="badgeNumber", type="string", example="987654"),
-    *             @OA\Property(property="firstName", type="string", example="Jane"),
-    *             @OA\Property(property="lastName", type="string", example="Smith"),
-    *             @OA\Property(property="mobileNumber", type="string", example="+15559876543"),
-    *             @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-01-25"),
-    *             @OA\Property(property="badgeExpirationDate", type="string", format="date", example="2026-12-31"),
-    *             @OA\Property(property="createAdminAccount", type="boolean", example=false),
-    *             @OA\Property(
-    *                 property="optionalGroupsForStandardUser",
-    *                 type="array",
-    *                 @OA\Items(type="string", example="Finance-Users")
-    *             ),
-    *             @OA\Property(
-    *                 property="optionalGroupsForHighPrivilegeUsers",
-    *                 type="array",
-    *                 @OA\Items(type="string", example="Domain-Admins")
-    *             )
-    *         )
-    *     ),
+    * @OA\RequestBody(
+    * required=true,
+    * @OA\JsonContent(
+    * required={
+    * "domain", "badgeNumber", "firstName", "lastName",
+    * "mobileNumber", "dateOfBirth", "badgeExpirationDate"
+    * },
+    * @OA\Property(property="domain", type="string", example="corp.example.com"),
+    * @OA\Property(property="badgeNumber", type="string", example="987654"),
+    * @OA\Property(property="firstName", type="string", example="Jane"),
+    * @OA\Property(property="lastName", type="string", example="Smith"),
+    * @OA\Property(property="mobileNumber", type="string", example="+15559876543"),
+    * @OA\Property(property="dateOfBirth", type="string", format="date", example="1990-01-25"),
+    * @OA\Property(property="badgeExpirationDate", type="string", format="date", example="2026-12-31"),
+    * @OA\Property(property="createAdminAccount", type="boolean", example=false),
+    * @OA\Property(
+    * property="optionalGroupsForStandardUser",
+    * type="array",
+    * @OA\Items(type="string", example="Finance-Users")
+    * ),
+    * @OA\Property(
+    * property="optionalGroupsForHighPrivilegeUsers",
+    * type="array",
+    * @OA\Items(type="string", example="Domain-Admins")
+    * )
+    * )
+    * ),
     *
-    *     @OA\Response(
-    *         response=201,
-    *         description="User created successfully",
-    *         @OA\JsonContent(
-    *             @OA\Property(property="message", type="string", example="User created successfully."),
-    *             @OA\Property(property="username", type="string", example="jsmith"),
-    *             @OA\Property(property="initial_password", type="string", example="TempP@ss123!"),
-    *             @OA\Property(property="admin_account_username", type="string", example="jsmith-admin"),
-    *             @OA\Property(property="admin_initial_password", type="string", example="Adm1nP@ss!")
-    *         )
-    *     ),
+    * @OA\Response(
+    * response=201,
+    * description="User created successfully",
+    * @OA\JsonContent(
+    * @OA\Property(property="message", type="string", example="User created successfully."),
+    * @OA\Property(property="username", type="string", example="jsmith"),
+    * @OA\Property(property="initial_password", type="string", example="TempP@ss123!"),
+    * @OA\Property(property="admin_account_username", type="string", example="jsmith-admin"),
+    * @OA\Property(property="admin_initial_password", type="string", example="Adm1nP@ss!")
+    * )
+    * ),
     *
-    *     @OA\Response(
-    *         response=403,
-    *         description="Unauthorized action or insufficient privileges",
-    *         @OA\JsonContent(
-    *             @OA\Property(property="message", type="string", example="Unauthorized to create admin accounts.")
-    *         )
-    *     ),
+    * @OA\Response(
+    * response=403,
+    * description="Unauthorized action or insufficient privileges",
+    * @OA\JsonContent(
+    * @OA\Property(property="message", type="string", example="Unauthorized to create admin accounts.")
+    * )
+    * ),
     *
-    *     @OA\Response(
-    *         response=422,
-    *         description="Validation failed",
-    *         @OA\JsonContent(
-    *             @OA\Property(property="errors", type="object", example={"mobileNumber": {"The mobileNumber field is required."}})
-    *         )
-    *     ),
+    * @OA\Response(
+    * response=422,
+    * description="Validation failed",
+    * @OA\JsonContent(
+    * @OA\Property(property="errors", type="object", example={"mobileNumber": {"The mobileNumber field is required."}})
+    * )
+    * ),
     *
-    *     @OA\Response(
-    *         response=500,
-    *         description="Server error",
-    *         @OA\JsonContent(
-    *             @OA\Property(property="message", type="string", example="Failed to create user: LDAP connection failed")
-    *         )
-    *     ),
+    * @OA\Response(
+    * response=500,
+    * description="Server error",
+    * @OA\JsonContent(
+    * @OA\Property(property="message", type="string", example="Failed to create user: LDAP connection failed")
+    * )
+    * ),
     *
-    *     security={{"bearerAuth": {}}}
+    * security={{"bearerAuth": {}}}
     * )
     */
     public function store(Request $request): JsonResponse
@@ -162,19 +162,19 @@ class UserController extends Controller
         // --- Validation ---
         $validator = Validator::make($request->all(), [
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
-            'badgeNumber' => ['required', 'string', 'regex:/^[0-9]+$/'],
-            'firstName' => 'required|string',
-            'lastName' => 'required|string',
-            'mobileNumber' => ['required', 'string', 'regex:/^\+[0-9]+$/'],
-            'dateOfBirth' => ['required', 'date_format:Y-m-d','before_or_equal:-18 years'],
-            'badgeExpirationDate' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
-            'createAdminAccount' => 'boolean',
-            'optionalGroupsForStandardUser' => 'array',
-            'optionalGroupsForHighPrivilegeUsers' => 'array',
+            'badge_number' => ['required', 'string', 'regex:/^[0-9]+$/'],
+            'first_name' => 'required|string',
+            'last_name' => 'required|string',
+            'mobile_number' => ['required', 'string', 'regex:/^\+[0-9]+$/'],
+            'date_of_birth' => ['required', 'date_format:Y-m-d','before_or_equal:-18 years'],
+            'badge_expiration_date' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
+            'has_admin' => 'boolean',
+            'groups_standard_user' => 'array',
+            'groups_privilege_user' => 'array',
         ]);
 
-        $validator->sometimes('optionalGroupsForHighPrivilegeUsers', 'required|array|min:1', function ($input) {
-            return !empty($input->createAdminAccount);
+        $validator->sometimes('groups_privilege_user', 'required|array|min:1', function ($input) {
+            return !empty($input->has_admin);
         });
 
         if ($validator->fails()) {
@@ -184,32 +184,50 @@ class UserController extends Controller
         $data = $validator->validated();
 
         // --- Enforce Role Permissions ---
-        if (!empty($data['createAdminAccount']) && !$user->hasHighPrivilegeAccess) {
+        if (!empty($data['has_admin']) && !$user->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'Unauthorized to create admin accounts.'], 403);
         }
 
         // --- Check if user exist ---
-        if ($this->adService->findUserBySamAccountName($data['badgeNumber'],$data['domain'])) {
-            return response()->json(['message' => 'User '.$data['badgeNumber'].' already exist.'], 403);
+        if ($this->adService->findUserBySamAccountName($data['badge_number'],$data['domain'])) {
+            return response()->json(['message' => 'User '.$data['badge_number'].' already exist.'], 403);
         }
 
         // --- Provisioning Logic ---
         try {
+            
+            // --- Initialize result variables ---
+            $userResult = null;
+            $adminResult = null;
 
             $data['hasGeneralAccess'] = $user->hasGeneralAccess;
             $data['hasHighPrivilegeAccess'] = $user->hasHighPrivilegeAccess;
 
-            $result = $this->adService->createUser($data);
+            // --- Create Regular Account ---
+            $userResult = $this->adService->createUser($data);
+
+            // --- Create Admin Account ---
+            if (!empty($data['has_admin']) && $user->hasHighPrivilegeAccess) {
+                if (!$this->adService->findUserBySamAccountName($data['badge_number'].'-a',$data['domain'])) {
+                    $adminResult = $this->adService->createAdminUser($data);
+                }               
+            }           
 
             $response = [
                 'message' => 'User created successfully.',
-                'username' => $result['user']->getFirstAttribute('samaccountname'),
-                'initial_password' => $result['password'],
+                'user_information' => [
+                    'username' => $userResult['user'] ? $userResult['user']->samaccountname : $data['badge_number'],
+                    'password' => $userResult['password'] ?? null,
+                    'groups' => $data['groups_standard_user'] ?? []
+                ]
             ];
-
-            if (!empty($result['adminAccount'])) {
-                $response['admin_account_username'] = $result['adminAccount']['user']->getFirstAttribute('samaccountname');
-                $response['admin_initial_password'] = $result['adminAccount']['initialPassword'];
+            
+            if ($adminResult) {
+                $response['admin_account_information'] = [
+                    'username' => $adminResult['user'] ? $adminResult['user']->samaccountname : $data['badge_number'].'-a',
+                    'password' => $adminResult['initialPassword'] ?? null,
+                    'groups'   => $data['groups_privilege_user'] ?? []
+                ];
             }
 
             return response()->json($response, 201);

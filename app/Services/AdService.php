@@ -264,8 +264,8 @@ class AdService
     {
         $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
         $lower = 'abcdefghijkmnpqrstuvwxyz';
-        $number = '23456789';
-        $special = '*$-+?_&=!%{}/';
+        $number = '123456789';
+        $special = '!@#$';
 
         $allChars = $upper . $lower . $number . $special;
 
@@ -325,8 +325,10 @@ class AdService
     protected function addUserToGroup(string $domain, LdapUser $user, string $groupName): bool
     {
         try {
+            Log::info("Adding '{$user}' to group...");
+
             $group = LdapGroup::on($domain)
-                ->where('samaccountname', '=', $groupName)
+                ->where('distinguishedname', '=', $groupName)
                 ->first();
 
             if ($group) {
@@ -414,7 +416,7 @@ class AdService
         Log::debug('User provisioning data:', $data);
 
         $domain         = $data['domain'];
-        $cn             = Str::title($data['firstName'])." ".Str::title($data['lastName']);
+        $cn             = Str::title($data['first_name'])." ".Str::title($data['last_name']);
         $dn             = $this->buildDn($cn, $domain, false);
 
         try {
@@ -422,16 +424,16 @@ class AdService
             // 1. Build DN and create base user object
             $user                       = new LdapUser;
             $user->cn                   = $cn;
-            $user->samaccountname       = $data['badgeNumber'];
-            $user->userprincipalname    = $data['badgeNumber'].'@'.$domain;
+            $user->samaccountname       = $data['badge_number'];
+            $user->userprincipalname    = $data['badge_number'].'@'.$domain;
             $user->displayname          = $cn;
-            $user->givenname            = Str::title($data['firstName']);
-            $user->sn                   = Str::title($data['lastName']);
-            $user->info                 = $data['dateOfBirth'];
-            $user->mail                 = $data['badgeNumber'].'@'.$domain;
-            $user->mobile               = $data['mobileNumber'];
+            $user->givenname            = Str::title($data['first_name']);
+            $user->sn                   = Str::title($data['last_name']);
+            $user->info                 = $data['date_of_birth'];
+            $user->mail                 = $data['badge_number'].'@'.$domain;
+            $user->mobile               = $data['mobile_number'];
             $user->useraccountcontrol   = 544;
-            $user->accountExpires       = strtotime($data['badgeExpirationDate']);
+            $user->accountExpires       = strtotime($data['badge_expiration_date']);
             $user->setDn($dn);
             $user->save();
 
@@ -446,35 +448,16 @@ class AdService
             $this->resetPassword($user, $initialPassword, true);
 
             // 3. Add to groups
-            foreach (($data['optionalGroupsForStandardUser'] ?? []) as $groupName) {
-
-                try {
-
-                    $group = LdapGroup::on($domain)->where('samaccountname', '=', $groupName)->first();
-
-                    if ($group) {
-
-                        $group->members()->attach($user);
-
-                        Log::info("Added user '{$cn}' to group '{$groupName}'");
-                    }
-                } catch (\Exception $e) {
-                    Log::error("Group attach error for '{$cn}' → '{$groupName}': " . $e->getMessage());
-                }
+            $arrStandardGroups = $data['groups_standard_user'] ?? null;
+            if (is_array($arrStandardGroups) && !empty($arrStandardGroups)) {
+                foreach ($arrStandardGroups as $standardGroup) {
+                    $this->addUserToGroup($domain, $user, $standardGroup);
+                }                
             }
-
-            /*
-            // 5. Optional admin account
-            $adminAccountData = null;
-            if ($data['createAdminAccount'] === true) {
-                $adminAccountData = $this->createAdminUser($domain, $data);
-            }
-            */
 
             return [
                 'user' => $user ?? null,
                 'password' => $initialPassword ?? null,
-                'adminAccount' => $adminAccountData ?? null,
             ];
 
         } catch (\Exception $e) {
@@ -543,85 +526,88 @@ class AdService
     }
 
     /**
-     * Check if a corresponding admin account exists.
-     *
-     * @param string $domain
-     * @param string $baseSamAccountName
-     * @return bool
-     */
-    public function checkIfAdminAccountExists(string $domain, string $baseSamAccountName): bool
-    {
-        return $this->findUserBySamAccountName("{$baseSamAccountName}-a", $domain) !== null;
-    }
-
-    /**
      * Create a new privileged (admin) Active Directory user account.
      *
      * @param string $domain
      * @param array $baseRequestData
      * @return array
      */
-    public function createAdminUser(string $domain, array $data): array
+    public function createAdminUser(array $data): array
     {
-        $baseSam    = $data['badgeNumber'];
-        $adminSam   = "{$baseSam}-a";
-        $cn         = "admin-{$data['firstName']}{$data['lastName']}";
-
-        Log::info("Creating admin account '{$adminSam}' in domain '{$domain}'");
+        $domain         = $data['domain'];
+        $cn             = "admin-".strtolower($data['first_name'].$data['last_name']);
+        $dn             = $this->buildDn($cn, $domain, true);
 
         try {
 
-            if ($this->checkIfAdminAccountExists($domain, $baseSam)) {
-                Log::info("Admin account '{$adminSam}' already exists, skipping creation.");
-                return [];
-            }
+            $user                       = new LdapUser;
+            $user->cn                   = $cn;
+            $user->samaccountname       = $data['badge_number'];
+            $user->userprincipalname    = $data['badge_number'].'-a@'.$domain;
+            $user->displayname          = $cn;
+            $user->givenname            = Str::title($data['first_name']);
+            $user->sn                   = Str::title($data['last_name']);
+            $user->useraccountcontrol   = 544;
+            $user->accountExpires       = Carbon::now()->addMonth()->timestamp;
+            $user->setDn($dn);
+            $user->save();
 
-            $dn = $this->buildDn($cn, $domain, true);
-            $adminUser = new LdapUser();
-            $adminUser->setConnection($domain);
-            $adminUser->setDn($dn);
+            Log::info("LDAP: Created minimal user object '{$cn}' successfully.");
 
-            $attributes = [
-                'cn' => $cn,
-                'displayName' => "admin-" . strtolower($data['firstName'] . $data['lastName']),
-                'givenName' => $data['firstName'],
-                'sn' => $data['lastName'],
-                'mail' => "{$baseSam}-a@{$domain}",
-                'mobile' => $data['mobileNumber'],
-                'name' => "admin-" . strtolower($data['firstName'] . $data['lastName']),
-                'sAMAccountName' => $adminSam,
-                'userPrincipalName' => "{$adminSam}@{$domain}",
-                'userAccountControl' => 512,
-                'accountExpires' => Carbon::now()->addMonth()->timestamp,
-            ];
+            // Reload the user entry before resetting its password to ensure replication completion:
+            sleep(1);
+            $user->refresh();
 
-            foreach ($attributes as $attr => $value) {
-                $adminUser->setAttribute($attr, $value);
-            }
+            // 2. Generate password
+            $initialPassword = $this->generatePassword();
+            $this->resetPassword($user, $initialPassword, true);
 
-            $adminUser->save();
+            // 3. Add to groups
+            $isFirstGroup = true;
+            $arrStandardGroups = $data['groups_standard_user'] ?? null;
+            if (is_array($arrStandardGroups) && !empty($arrStandardGroups)) {
+                foreach ($arrStandardGroups as $standardGroupDN) { // Renamed variable for clarity
+                    
+                    // Find the group object by its DN
+                    $group = LdapGroup::on($domain)
+                                ->where('distinguishedname', '=', $standardGroupDN)
+                                ->first();
 
-            $password = $this->generatePassword();
-            $this->resetPassword($adminUser, $password, true);
-
-            foreach (($data['optionalGroupsForHighPrivilegeUsers'] ?? []) as $groupName) {
-                try {
-                    $group = LdapGroup::on($domain)->where('samaccountname', '=', $groupName)->first();
                     if ($group) {
-                        $group->members()->attach($adminUser);
-                        Log::info("Added admin '{$adminSam}' to group '{$groupName}'");
+                        // Add the user to the group
+                        $group->members()->attach($user);
+                        Log::info("Added '{$user->getName()}' to group '{$standardGroupDN}'.");
+
+                        // Set primary group if it's the first one
+                        if ($isFirstGroup) {
+                            
+                            $stringSid = $group->getObjectSid();
+                            $rid = last(explode('-', $stringSid));
+                            
+                            if (is_numeric($rid)) {
+                                $user->setAttribute('primaryGroupID', $rid);
+                                $user->save(); // Save the primary group change
+                                Log::info("Set primary group ID to {$rid} for user '{$user->getName()}'.");
+                            } else {
+                                Log::warning("Could not extract RID from group SID: {$stringSid} for group '{$standardGroupDN}'");
+                            }
+                            
+                            $isFirstGroup = false;
+                        }
+
+                    } else {
+                        Log::warning("Group '{$standardGroupDN}' not found in domain '{$domain}'.");
                     }
-                } catch (\Exception $e) {
-                    Log::error("Failed adding '{$adminSam}' to group '{$groupName}': " . $e->getMessage());
-                }
+                }                
             }
 
-            // --- Remove from default 'Domain Users' group using helper ---
-            $this->removeUserFromGroup($domain, $adminUser, 'Domain Users');
+            // 4. Remove Domain Users
+            $this->removeUserFromGroup($domain, $user, 'Domain Users');
 
-            return ['user' => $adminUser, 'initialPassword' => $password];
+            return ['user' => $user, 'initialPassword' => $initialPassword];
+
         } catch (\Exception $e) {
-            Log::error("Failed to create admin user '{$adminSam}': " . $e->getMessage());
+            Log::error("Failed to create admin user '{$cn}': " . $e->getMessage());
             throw $e;
         }
     }
