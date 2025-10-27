@@ -184,14 +184,14 @@ class UserController extends Controller
         $data = $validator->validated();
 
         // --- Enforce Role Permissions ---
-        if (!empty($data['has_admin']) && !$user->hasHighPrivilegeAccess) {
-            return response()->json(['message' => 'Unauthorized to create admin accounts.'], 403);
-        }
+        #if (!empty($data['has_admin']) && !$user->hasHighPrivilegeAccess) {
+        #    return response()->json(['message' => 'Unauthorized to create admin accounts.'], 403);
+        #}
 
         // --- Check if user exist ---
-        if ($this->adService->findUserBySamAccountName($data['badge_number'],$data['domain'])) {
-            return response()->json(['message' => 'User '.$data['badge_number'].' already exist.'], 403);
-        }
+        #if ($this->adService->findUserBySamAccountName($data['badge_number'],$data['domain'])) {
+        #    return response()->json(['message' => 'User '.$data['badge_number'].' already exist.'], 403);
+        #}
 
         // --- Provisioning Logic ---
         try {
@@ -202,9 +202,10 @@ class UserController extends Controller
 
             $data['hasGeneralAccess'] = $user->hasGeneralAccess;
             $data['hasHighPrivilegeAccess'] = $user->hasHighPrivilegeAccess;
+$adminResult = $this->adService->createAdminUser($data); die;
 
             // --- Create Regular Account ---
-            $userResult = $this->adService->createUser($data);
+            #$userResult = $this->adService->createUser($data);
 
             // --- Create Admin Account ---
             if (!empty($data['has_admin']) && $user->hasHighPrivilegeAccess) {
@@ -212,10 +213,10 @@ class UserController extends Controller
                     $adminResult = $this->adService->createAdminUser($data);
                 }               
             }           
-
+die;
             $response = [
                 'message' => 'User created successfully.',
-                'user_information' => [
+                'standard_information' => [
                     'username' => $userResult['user'] ? $userResult['user']->samaccountname : $data['badge_number'],
                     'password' => $userResult['password'] ?? null,
                     'groups' => $data['groups_standard_user'] ?? []
@@ -223,7 +224,7 @@ class UserController extends Controller
             ];
             
             if ($adminResult) {
-                $response['admin_account_information'] = [
+                $response['admin_information'] = [
                     'username' => $adminResult['user'] ? $adminResult['user']->samaccountname : $data['badge_number'].'-a',
                     'password' => $adminResult['initialPassword'] ?? null,
                     'groups'   => $data['groups_privilege_user'] ?? []

@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
 use LdapRecord\Models\ActiveDirectory\User as LdapUser;
 use LdapRecord\Models\ActiveDirectory\Group as LdapGroup;
+use LdapRecord\Models\Attributes\Sid as LdapSid;
 use LdapRecord\Models\ModelNotFoundException;
 use Illuminate\Support\Str;
 use Illuminate\Support\Arr;
@@ -34,13 +35,10 @@ class AdService
      * @param string $domain
      * @return \LdapRecord\Query\Model\Builder
      */
-    public function newQuery(string $domain): \LdapRecord\Query\Model\Builder
+    protected function newQuery(string $domain): \LdapRecord\Query\Model\Builder
     {
         return LdapUser::on($domain);
     }
-
-
-    // --- STABLE METHODS (DO NOT TOUCH) ---
 
     /**
      * Attempt to bind a user to a specific domain connection.
@@ -187,9 +185,6 @@ class AdService
             ];
         }
     }
-
-    // --- END STABLE METHODS ---
-
 
     /**
      * Find a security group by its sAMAccountName on a specific domain.
@@ -538,11 +533,13 @@ class AdService
         $cn             = "admin-".strtolower($data['first_name'].$data['last_name']);
         $dn             = $this->buildDn($cn, $domain, true);
 
+        Log::info("LDAP: DN set to: '{$dn}'");
+
         try {
 
             $user                       = new LdapUser;
             $user->cn                   = $cn;
-            $user->samaccountname       = $data['badge_number'];
+            $user->samaccountname       = $data['badge_number'].'-a';
             $user->userprincipalname    = $data['badge_number'].'-a@'.$domain;
             $user->displayname          = $cn;
             $user->givenname            = Str::title($data['first_name']);
@@ -564,41 +561,73 @@ class AdService
 
             // 3. Add to groups
             $isFirstGroup = true;
-            $arrStandardGroups = $data['groups_standard_user'] ?? null;
-            if (is_array($arrStandardGroups) && !empty($arrStandardGroups)) {
-                foreach ($arrStandardGroups as $standardGroupDN) { // Renamed variable for clarity
-                    
-                    // Find the group object by its DN
+            $arrPrivilegeGroups = $data['groups_privilege_user'] ?? null;
+            if (is_array($arrPrivilegeGroups) && !empty($arrPrivilegeGroups)) {
+                foreach ($arrPrivilegeGroups as $privilegeGroupDN) {
+
+                    // Fetch group with attributes needed for primary group logic:
                     $group = LdapGroup::on($domain)
-                                ->where('distinguishedname', '=', $standardGroupDN)
-                                ->first();
+                        ->select(['*', 'primaryGroupToken', 'objectSid', 'groupType'])
+                        ->where('distinguishedname', '=', $privilegeGroupDN)
+                        ->first();
 
                     if ($group) {
-                        // Add the user to the group
+                        // 3.1 Attach user to group first
                         $group->members()->attach($user);
-                        Log::info("Added '{$user->getName()}' to group '{$standardGroupDN}'.");
+                        Log::info("Added '{$user->getName()}' to group '{$privilegeGroupDN}'.");
 
-                        // Set primary group if it's the first one
+                        // 3.2 If this is the first privileged group, try to make it primary
                         if ($isFirstGroup) {
-                            
-                            $stringSid = $group->getObjectSid();
-                            $rid = last(explode('-', $stringSid));
-                            
-                            if (is_numeric($rid)) {
-                                $user->setAttribute('primaryGroupID', $rid);
-                                $user->save(); // Save the primary group change
-                                Log::info("Set primary group ID to {$rid} for user '{$user->getName()}'.");
+                            $rid = 0;
+
+                            // Prefer primaryGroupToken when present and non-zero
+                            $pgToken = (int) ($group->getFirstAttribute('primaryGroupToken') ?? 0);
+                            if ($pgToken > 0) {
+                                $rid = $pgToken;
+                                Log::info("primaryGroupToken={$rid} found on '{$privilegeGroupDN}'.");
                             } else {
-                                Log::warning("Could not extract RID from group SID: {$stringSid} for group '{$standardGroupDN}'");
+                                Log::warning("primaryGroupToken is '0' or missing on '{$privilegeGroupDN}'. Falling back to SID parsing.");
                             }
-                            
+
+                            // Fall back to SID -> RID
+                            if ($rid <= 0) {
+                                $sidBin = $group->getFirstAttribute('objectsid');
+                                if (!empty($sidBin)) {
+                                    try {
+                                        $sidStr = LdapSid::fromBinary($sidBin)->toSddl(); // e.g., S-1-5-21-...-RID
+                                        $rid = (int) substr($sidStr, strrpos($sidStr, '-') + 1);
+                                        Log::info("Derived RID {$rid} from group SID {$sidStr} for '{$privilegeGroupDN}'.");
+                                    } catch (\Throwable $e) {
+                                        Log::error("Failed to parse SID for '{$privilegeGroupDN}': " . $e->getMessage());
+                                    }
+                                } else {
+                                    Log::warning("objectSid missing on '{$privilegeGroupDN}'.");
+                                }
+                            }
+
+                            // Validate group is Global Security (eligible to be primary)
+                            $groupType = (int) ($group->getFirstAttribute('groupType') ?? 0);
+                            $isSecurity = ($groupType & 0x80000000) !== 0; // SECURITY_ENABLED
+                            $isGlobal   = ($groupType & 0x00000002) !== 0; // GLOBAL_SCOPE
+                            Log::info("Group '{$privilegeGroupDN}' attrs: groupType={$groupType}, isSecurity=" . ($isSecurity ? '1' : '0') . ", isGlobal=" . ($isGlobal ? '1' : '0'));
+
+                            if (!$isSecurity || !$isGlobal) {
+                                Log::warning("Group '{$privilegeGroupDN}' is not a Global Security group; cannot set as primary group.");
+                            } elseif ($rid > 0) {
+                                $user->setAttribute('primaryGroupID', $rid);
+                                $user->save();
+                                Log::info("Set primaryGroupID={$rid} for '{$user->getName()}'.");
+                            } else {
+                                Log::warning("Could not determine a valid RID for '{$privilegeGroupDN}'. primaryGroupID unchanged.");
+                            }
+
                             $isFirstGroup = false;
                         }
 
                     } else {
-                        Log::warning("Group '{$standardGroupDN}' not found in domain '{$domain}'.");
+                        Log::warning("Group '{$privilegeGroupDN}' not found in domain '{$domain}'.");
                     }
-                }                
+                }
             }
 
             // 4. Remove Domain Users
