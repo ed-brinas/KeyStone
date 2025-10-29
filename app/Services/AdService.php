@@ -352,22 +352,28 @@ class AdService
     protected function removeUserFromGroup(string $domain, LdapUser $user, string $groupName): bool
     {
         try {
+            // Find group by DN
             $group = LdapGroup::on($domain)
-                ->where('samaccountname', '=', $groupName)
+                ->where('distinguishedname', '=', $groupDn)
                 ->first();
 
-            if ($group && $group->members()->exists($user)) {
+            if (!$group) {
+                Log::warning("Group DN '{$groupDn}' not found in domain '{$domain}'.");
+                return false;
+            }
+
+            if ($group->members()->exists($user)) {
                 $group->members()->detach($user);
-                Log::info("Removed '{$user->getName()}' from group '{$groupName}'.");
+                Log::info("Removed '{$user->getName()}' from group '{$groupDn}'.");
                 return true;
             }
 
-            Log::debug("Group '{$groupName}' not found or user '{$user->getName()}' not a member.");
-        } catch (\Exception $e) {
-            Log::error("Failed to remove '{$user->getName()}' from group '{$groupName}': " . $e->getMessage());
+            Log::debug("User '{$user->getName()}' is not an explicit member of '{$groupDn}'.");
+            return true; // No-op is fine
+        } catch (\Throwable $e) {
+            Log::error("Failed to remove '{$user->getName()}' from '{$groupDn}': " . $e->getMessage());
+            return false;
         }
-
-        return false;
     }
 
     /**
@@ -631,7 +637,7 @@ class AdService
             }
 
             // 4. Remove Domain Users
-            $this->removeUserFromGroup($domain, $user, 'Domain Users');
+            $this->removeUserFromGroup($domain, $user, 'CN=Domain Users,CN=Users,DC=ncc,DC=lab');
 
             return ['user' => $user, 'initialPassword' => $initialPassword];
 

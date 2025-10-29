@@ -15,6 +15,7 @@ return [
     'adSettings' => [
         'forestRootDomain' => env('LDAP_FOREST_ROOT_DOMAIN', 'ncc.local'),
         'domains' => explode(',', env('LDAP_DOMAINS', 'ncc.local,ems.ncc.local')),
+        'domainUsersDN' => 'CN=Domain Users,CN=Users,DC=ncc,DC=lab',
     ],
 
     'applicationAccessControl' => [
