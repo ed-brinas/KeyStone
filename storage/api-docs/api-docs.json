@@ -278,7 +278,7 @@
                     "Users"
                 ],
                 "summary": "Create a new Active Directory user",
-                "description": "Creates a new user in the specified domain.\n    *     - User managers can create standard users (saved under provisioning->ouStandardUser).\n    *     - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).\n    *     - Optional groups can be assigned from configuration lists.\n    *   ",
+                "description": "Creates a new user in the specified domain.\n    * - User managers can create standard users (saved under provisioning->ouStandardUser).\n    * - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).\n    * - Optional groups can be assigned from configuration lists.\n    * ",
                 "operationId": "ba548b97148bb5c0d8cab3bc3f128bfd",
                 "requestBody": {
                     "required": true,
@@ -287,60 +287,60 @@
                             "schema": {
                                 "required": [
                                     "domain",
-                                    "badgeNumber",
-                                    "firstName",
-                                    "lastName",
-                                    "mobileNumber",
-                                    "dateOfBirth",
-                                    "badgeExpirationDate"
+                                    "badge_number",
+                                    "first_name",
+                                    "last_name",
+                                    "mobile_number",
+                                    "date_of_birth",
+                                    "badge_expiration_date"
                                 ],
                                 "properties": {
                                     "domain": {
                                         "type": "string",
                                         "example": "corp.example.com"
                                     },
-                                    "badgeNumber": {
+                                    "badge_number": {
                                         "type": "string",
                                         "example": "987654"
                                     },
-                                    "firstName": {
+                                    "first_name": {
                                         "type": "string",
                                         "example": "Jane"
                                     },
-                                    "lastName": {
+                                    "last_name": {
                                         "type": "string",
                                         "example": "Smith"
                                     },
-                                    "mobileNumber": {
+                                    "mobile_number": {
                                         "type": "string",
                                         "example": "+15559876543"
                                     },
-                                    "dateOfBirth": {
+                                    "date_of_birth": {
                                         "type": "string",
                                         "format": "date",
                                         "example": "1990-01-25"
                                     },
-                                    "badgeExpirationDate": {
+                                    "badge_expiration_date": {
                                         "type": "string",
                                         "format": "date",
                                         "example": "2026-12-31"
                                     },
-                                    "createAdminAccount": {
+                                    "has_admin": {
                                         "type": "boolean",
                                         "example": false
                                     },
-                                    "optionalGroupsForStandardUser": {
+                                    "groups_standard_user": {
                                         "type": "array",
                                         "items": {
                                             "type": "string",
-                                            "example": "Finance-Users"
+                                            "example": "CN=Finance-Users,OU=Groups,DC=corp,DC=example,DC=com"
                                         }
                                     },
-                                    "optionalGroupsForHighPrivilegeUsers": {
+                                    "groups_privilege_user": {
                                         "type": "array",
                                         "items": {
                                             "type": "string",
-                                            "example": "Domain-Admins"
+                                            "example": "CN=Domain-Admins,OU=Groups,DC=corp,DC=example,DC=com"
                                         }
                                     }
                                 },
@@ -407,8 +407,8 @@
                                         "errors": {
                                             "type": "object",
                                             "example": {
-                                                "mobileNumber": [
-                                                    "The mobileNumber field is required."
+                                                "mobile_number": [
+                                                    "The mobile_number field is required."
                                                 ]
                                             }
                                         }
@@ -496,7 +496,7 @@
                     {
                         "name": "samaccountname",
                         "in": "path",
-                        "description": "The user's SAM account name (AD username)",
+                        "description": "The user's CURRENT SAM account name (AD username)",
                         "required": true,
                         "schema": {
                             "type": "string",
@@ -524,8 +524,9 @@
                                         "example": "corp.example.com"
                                     },
                                     "badgeNumber": {
+                                        "description": "The NEW or current badge number (becomes the new samaccountname)",
                                         "type": "string",
-                                        "example": "123456"
+                                        "example": "123457"
                                     },
                                     "firstName": {
                                         "type": "string",
@@ -547,9 +548,10 @@
                                     "badgeExpirationDate": {
                                         "type": "string",
                                         "format": "date",
-                                        "example": "2026-06-15"
+                                        "example": "2027-06-15"
                                     },
                                     "createAdminAccount": {
+                                        "description": "Set to true to create or update the associated admin account",
                                         "type": "boolean",
                                         "example": false
                                     },
@@ -557,14 +559,14 @@
                                         "type": "array",
                                         "items": {
                                             "type": "string",
-                                            "example": "IT-Support"
+                                            "example": "CN=IT-Support,OU=Groups,DC=corp,DC=example,DC=com"
                                         }
                                     },
                                     "optionalGroupsForHighPrivilegeUsers": {
                                         "type": "array",
                                         "items": {
                                             "type": "string",
-                                            "example": "Domain-Admins"
+                                            "example": "CN=Domain-Admins,OU=Groups,DC=corp,DC=example,DC=com"
                                         }
                                     }
                                 },

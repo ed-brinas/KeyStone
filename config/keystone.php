@@ -57,6 +57,11 @@ return [
         'ouPrivilegeUser' => 'OU=_AdminAccounts,{domain-components}',
 
         /**
+         * The default OU a privilege user accounts will be added.
+         */
+        'ouPrivilegeUserGroup' => 'CN=_admin-no-login,OU=_AdminAccounts,{domain-components}',
+
+        /**
          * A list of optional AD security groups that can be assigned to a
          * new standard user during creation.
          */
