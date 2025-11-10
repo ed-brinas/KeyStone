@@ -23,7 +23,9 @@ return [
          * AD security groups whose members are allowed general access
          * to the admin portal.
          */
-        'generalAccessGroups' => ['CN=L2,CN=Users,{domain-components}',],
+        'generalAccessGroups' => [
+            'CN=L2,CN=Users,{domain-components}',
+        ],
 
         /**
          * AD security groups whose members are considered high-privilege.
@@ -68,7 +70,7 @@ return [
         'optionalGroupsForStandardUser' => [
             'CN=L1,CN=Users,{domain-components}',
             'CN=L2,CN=Users,{domain-components}',
-            'CN=EMS-RDP,CN=Users,{domain-components}',
+            'CN=RDP-EMS,CN=Users,{domain-components}',
             'CN=FEP-RDP,CN=Users,{domain-components}'
         ],
 
@@ -77,8 +79,7 @@ return [
          * new privileged user during creation.
          */
         'optionalGroupsForHighPrivilegeUsers' => [
-            'CN=L3,CN=Users,{domain-components}',
-            'CN=Domain Admins,CN=Users,{domain-components}'
+            'CN=L3,CN=Users,{domain-components}'
         ],
     ],
 ];

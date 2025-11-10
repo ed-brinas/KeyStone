@@ -117,6 +117,90 @@ class AdService
     }
 
     /**
+     * Remove a user from a specified Active Directory group.
+     *
+     * @param string $domain
+     * @param LdapUser $user
+     * @param string $groupName (This must be the full DN of the group)
+     * @return bool
+     */
+    protected function removeUserFromGroup(string $domain, LdapUser $user, string $groupName): bool
+    {
+        try {
+            Log::info("Attempting to remove '{$user->getName()}' from group '{$groupName}'...");
+
+            $group = LdapGroup::on($domain)
+                ->where('distinguishedname', '=', $groupName)
+                ->first();
+
+            if ($group) {
+                if ($user->groups()->exists($group)) {
+                    $group->members()->detach($user);
+                    Log::info("Removed '{$user->getName()}' from group '{$groupName}'.");
+                } else {
+                    Log::info("'{$user->getName()}' is not a member of group '{$groupName}'.");
+                }
+                return true;
+            }
+            Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
+        } catch (\Exception $e) {
+            Log::error("Failed to remove '{$user->getName()}' from group '{$groupName}': " . $e->getMessage());
+        }
+        return false;
+    }
+
+
+    /**
+     * Synchronizes a user's optional group memberships.
+     *
+     * @param string $domain
+     * @param LdapUser $user
+     * @param array $newGroupDns The list of group DNs the user *should* be in.
+     * @param array $manageableGroupDns The list of *all* optional groups this function is allowed to manage.
+     * @return void
+     */
+    protected function syncUserGroups(string $domain, LdapUser $user, array $newGroupDns, array $manageableGroupDns): void
+    {
+        try {
+            // Normalize all DNs to lowercase for comparison
+            $newGroupDns = array_map('strtolower', $newGroupDns);
+            $manageableGroupDns = array_map('strtolower', $manageableGroupDns);
+
+            $currentGroups = $user->groups()->get()
+                ->pluck('distinguishedname')
+                ->flatten() // <-- FIX: Flatten potential arrays of DNs
+                ->filter(fn($g) => is_string($g) && !empty($g)) // <-- FIX: Ensure we only have non-empty strings
+                ->map('strtolower')
+                ->unique() // Add unique check for consistency
+                ->toArray();
+
+            // 1. Find groups to add
+            $groupsToAdd = array_diff($newGroupDns, $currentGroups);
+            foreach ($groupsToAdd as $groupDn) {
+                // We only care about adding groups that are in the new list.
+                $this->addUserToGroup($domain, $user, $groupDn);
+            }
+
+            // 2. Find groups to remove
+            // These are groups the user is currently in, but are NOT in the new list.
+            $groupsToRemove = array_diff($currentGroups, $newGroupDns);
+
+            // 3. CRITICAL: Filter $groupsToRemove to only include groups we are allowed to manage.
+            // We do not want to remove users from "Domain Users" or other essential groups
+            // that aren't part of this optional list.
+            $safeToRemove = array_intersect($groupsToRemove, $manageableGroupDns);
+
+            foreach ($safeToRemove as $groupDn) {
+                $this->removeUserFromGroup($domain, $user, $groupDn);
+            }
+
+        } catch (\Exception $e) {
+            Log::error("Failed to sync groups for '{$user->getName()}': " . $e->getMessage());
+        }
+    }
+
+
+    /**
      * Resolves a DN template string by replacing {domain-components} with the correct DN.
      *
      * @param string $dnTemplate The DN template string (e.g., "CN=Users,{domain-components}")
@@ -161,6 +245,43 @@ class AdService
     }
 
     /**
+     * Converts a Y-m-d date string to an AD-compatible timestamp (Windows FileTime).
+     *
+     * @param string $dateString (Y-m-d)
+     * @return string
+     */
+    protected function convertDateToAdTimestamp(string $dateString): string
+    {
+        try {
+            // Parse the date and set to end of day
+            $carbonDate = Carbon::parse($dateString)->endOfDay();
+            // Convert to Unix timestamp
+            $unixTimestamp = $carbonDate->timestamp;
+            // Convert to Windows FileTime (100-nanosecond intervals since Jan 1, 1601)
+            $fileTime = ($unixTimestamp + 11644473600) * 10000000;
+            return (string)$fileTime;
+        } catch (\Exception $e) {
+            Log::error("Failed to convert date '{$dateString}' to AD timestamp: " . $e->getMessage());
+            // Fallback to a distant future date (approx 2038)
+            return '21474836470000000';
+        }
+    }
+
+    /**
+     * Convert AD 'accountExpires' dateString to Y-m-d or 'Never'.
+     *
+     * @param string|int $dateString
+     * @return string|null
+     */
+    protected function convertDateToTimestamp(string $dateTimeString): string
+    {
+        if ($dateTimeString == '0' || $dateTimeString >= '9223372036854775807') {
+            return 'Never';
+        }
+        return Carbon::parse($dateTimeString)->format('Y-m-d H:i:s');
+    }
+
+    /**
      * Provisions a new AD user (standard or admin).
      * (Assumes $data contains snake_case keys from validation)
      *
@@ -181,12 +302,13 @@ class AdService
             $cn       = "admin-".strtolower($data['first_name'].$data['last_name']);
             $sam      = $data['badge_number'].'-a';
             $dn       = $this->buildDn($cn, $domain, true);
-            $expires  = Carbon::now()->addMonth()->timestamp; // Admin accounts expire in 1 month
+            // *** FIX: Use consistent AD timestamp for admin users ***
+            $expires  = $this->convertDateToAdTimestamp(Carbon::now()->addMonth()->toDateString());
         } else {
             $cn       = $firstName." ".$lastName;
             $sam      = $data['badge_number'];
             $dn       = $this->buildDn($cn, $domain, false);
-            $expires  = $this->convertDateToAdTimestamp($data['badge_expiration_date']);
+            $expires  = $this->convertDateToAdTimestamp($data['date_of_expiry']);
         }
 
         Log::info("LDAP: DN set to: '{$dn}'");
@@ -266,6 +388,84 @@ class AdService
             throw $e;
         }
     }
+
+    /**
+     * Updates an existing AD user (standard or admin).
+     * (Assumes $data contains snake_case keys from validation)
+     *
+     * @param LdapUser $user The user object to update
+     * @param array $data
+     * @param boolean $isAdmin
+     * @return LdapUser
+     */
+    protected function updateAdUser(LdapUser $user, array $data, bool $isAdmin = false): LdapUser
+    {
+        $domain = $data['domain'];
+        $newSam = $data['badge_number'];
+        $firstName = Str::title($data['first_name']);
+        $lastName = Str::title($data['last_name']);
+        $originalSam = $user->samaccountname[0];
+
+        if ($isAdmin) {
+            $sam = $newSam . '-a';
+            $cn = "admin-" . strtolower($data['first_name'] . $data['last_name']);
+            $expires = $this->convertDateToAdTimestamp(Carbon::now()->addMonth()->toDateString());
+        } else {
+            $sam = $newSam;
+            $cn = $firstName . " " . $lastName;
+            $expires = $this->convertDateToAdTimestamp($data['date_of_expiry']);
+        }
+
+        Log::info("Updating AD user '{$originalSam}' to '{$sam}' in domain '{$domain}'");
+
+        $user->samaccountname = $sam;
+        $user->userprincipalname = $sam . '@' . $domain;
+        $user->cn = $cn;
+        $user->displayname = $cn;
+        $user->givenname = $firstName;
+        $user->sn = $lastName;
+        $user->accountExpires = $expires;
+
+        // --- Standard-User-Only Attributes ---
+        if (!$isAdmin) {
+            $user->info = $data['date_of_birth'];
+            $user->mail = $sam . '@' . $domain;
+            $user->mobile = $data['mobile_number'];
+        }
+
+        $user->save();
+
+        // --- Group Logic (Sync) ---
+        if ($isAdmin) {
+            // --- Admin Group Logic ---
+            $newGroups = $data['groups_privilege_user'] ?? [];
+            $allOptionalGroups = config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', []);
+            $this->syncUserGroups($domain, $user, $newGroups, $allOptionalGroups);
+
+            // --- START: Ensure user is in default privilege group ---
+            try {
+                $groupTemplate = config('keystone.provisioning.ouPrivilegeUserGroup');
+                if ($groupTemplate) {
+                    $defaultPrivilegeGroupDn = $this->resolveDnTemplate($groupTemplate, $domain);
+                    Log::info("Checking admin user membership in default privilege group: {$defaultPrivilegeGroupDn}");
+                    $this->addUserToGroup($domain, $user, $defaultPrivilegeGroupDn);
+                } else {
+                    Log::warning("keystone.provisioning.ouPrivilegeUserGroup is not defined in config.");
+                }
+            } catch (\Exception $e) {
+                Log::error("Failed to add admin user to default privilege group during update: " . $e->getMessage());
+            }
+            // --- END: Add user to default privilege group from config ---
+        } else {
+            // --- Standard Group Logic ---
+            $newGroups = $data['groups_standard_user'] ?? [];
+            $allOptionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
+            $this->syncUserGroups($domain, $user, $newGroups, $allOptionalGroups);
+        }
+
+        return $user;
+    }
+
 
     // ===================================================================
     // PUBLIC METHODS
@@ -402,6 +602,7 @@ class AdService
             // Step 3: Match user’s AD group DNs with config
             $hasGeneralAccess = count(array_intersect($userGroups, $generalAccessGroups)) > 0;
             $hasHighPrivilegeAccess = count(array_intersect($userGroups, $highPrivilegeGroups)) > 0;
+            $hasGeneralAccess = ($hasHighPrivilegeAccess > 0) ? $hasHighPrivilegeAccess : $hasGeneralAccess;
 
             Log::info('User group evaluation', [
                 'domain' => $domain,
@@ -554,76 +755,62 @@ class AdService
 
     /**
      * Update a user's details.
-     * (Assumes $data contains camelCase keys from update validation)
+     * (Assumes $data contains snake_case keys from update validation)
      *
      * @param array $data Validated data from UpdateUserRequest
      * @return LdapUser
      */
     public function updateUser(array $data): array
     {
+        // Use snake_case keys now, passed from controller
         $domain         = $data['domain'];
-        $currentSam     = $data['samaccountname']; // From URL path
-        $newSam         = $data['badgeNumber']; // From request body
-        $cn             = Str::title($data['firstName'])." ".Str::title($data['lastName']);
+        // $currentSam     = $data['current_samaccountname']; // From URL path - NO LONGER USED FOR SEARCH
+        $samToUpdate    = $data['badge_number']; // From request body, this is the key
 
-        Log::info("Updating AD user '{$currentSam}' in domain '{$domain}'");
+        Log::info("Attempting to find and update AD user '{$samToUpdate}' in domain '{$domain}'");
 
         try {
-            $user = $this->findUserBySamAccountName($currentSam, $domain);
+            // *** MODIFIED LOGIC: Find user by badge_number from payload ***
+            $user = $this->findUserBySamAccountName($samToUpdate, $domain);
             if (!$user) {
-                throw new ModelNotFoundException("User '{$currentSam}' not found in domain '{$domain}'.");
+                // *** MODIFIED LOGIC: Throw error if not found ***
+                throw new ModelNotFoundException("User '{$samToUpdate}' not found in domain '{$domain}'.");
             }
 
-            // --- Update Attributes (mirroring createUser) ---
-            $user->samaccountname       = $newSam;
-            $user->userprincipalname    = $newSam.'@'.$domain;
-            $user->cn                   = $cn;
-            $user->displayname          = $cn;
-            $user->givenname            = Str::title($data['firstName']);
-            $user->sn                   = Str::title($data['lastName']);
-            $user->info                 = $data['dateOfBirth'];
-            $user->mail                 = $newSam.'@'.$domain;
-            $user->mobile               = $data['mobileNumber'];
-            $user->accountExpires       = $this->convertDateToAdTimestamp($data['badgeExpirationDate']);
+            // --- Update Standard User Attributes (call protected method) ---
+            // This will update the user's info and sync standard groups
+            $user = $this->updateAdUser($user, $data, false);
+            Log::info("User '{$samToUpdate}' updated successfully.");
 
-            $user->save();
-            Log::info("User '{$currentSam}' updated successfully to '{$newSam}'.");
 
-            // --- Group Logic (Add-Only) ---
-            // This replicates the create logic (only adds, doesn't remove)
-            $arrStandardGroups = $data['optionalGroupsForStandardUser'] ?? null;
-            if (is_array($arrStandardGroups) && !empty($arrStandardGroups)) {
-                foreach ($arrStandardGroups as $standardGroup) {
-                    // addUserToGroup already checks if member exists
-                    $this->addUserToGroup($domain, $user, $standardGroup);
-                }
-            }
-
-            // --- Admin Account Logic ---
+            // --- Admin Account Logic (Orchestration) ---
             $adminResult = null;
-            $isPrivileged = !empty($data['createAdminAccount']);
+            $isPrivileged = !empty($data['has_admin']);
             $canManageAdmin = !empty($data['hasHighPrivilegeAccess']);
 
             if ($isPrivileged && $canManageAdmin) {
-                // We check based on the *new* samaccountname
-                if ($this->checkIfAdminAccountExists($domain, $newSam)) {
-                    Log::info("Admin account exists for '{$newSam}', updating...");
-                    // updateAdminUser expects camelCase data, but also the original samaccountname
-                    // We must provide the *original* samaccountname from the URL path for lookup
-                    $data['samaccountname'] = $currentSam;
-                    $adminResult = $this->updateAdminUser($data);
+                // Admin SAM is based on the badge_number
+                $adminSam = "{$samToUpdate}-a";
+                $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
+
+                if ($adminUser) {
+                    Log::info("Admin account '{$adminSam}' exists, updating...");
+                    // Pass admin user and data
+                    $adminResult = $this->updateAdminUser($adminUser, $data);
                 } else {
-                    Log::info("Admin account does not exist for '{$newSam}', creating...");
-                    // createAdminUser expects snake_case, so we must map keys
-                    $adminCreateData = [
-                        'domain' => $data['domain'],
-                        'badge_number' => $data['badgeNumber'],
-                        'first_name' => $data['firstName'],
-                        'last_name' => $data['lastName'],
-                        'groups_privilege_user' => $data['optionalGroupsForHighPrivilegeUsers'] ?? []
-                    ];
-                    $adminResult = $this->createAdminUser($adminCreateData);
+                    Log::info("Admin account '{$adminSam}' does not exist, creating...");
+                    // createAdminUser expects snake_case, which $data already is.
+                    $adminResult = $this->createAdminUser($data);
                 }
+            } else if (!$isPrivileged && $canManageAdmin) {
+                 // User *unchecked* the "has_admin" box. We should check if an admin account exists and,
+                 // if so, *delete* it, as per the use case.
+                 $adminSam = "{$samToUpdate}-a";
+                 Log::info("has_admin is false. Checking if admin account '{$adminSam}' exists to delete it."); // MODIFIED LOG
+                 if ($this->findUserBySamAccountName($adminSam, $domain)) {
+                    $this->deleteAdminAccount($domain, $adminSam); // MODIFIED METHOD CALL
+                    $adminResult = ['message' => "Admin account {$adminSam} deleted."]; // MODIFIED MESSAGE
+                 }
             }
 
             return [
@@ -632,76 +819,32 @@ class AdService
             ];
 
         } catch (\Exception $e) {
-            Log::error("Failed to update AD user '{$currentSam}': " . $e->getMessage());
+            // Catch ModelNotFoundException from above
+            if ($e instanceof ModelNotFoundException) {
+                Log::warning($e->getMessage());
+                throw $e;
+            }
+            Log::error("Failed to update AD user '{$samToUpdate}': " . $e->getMessage());
             throw $e;
         }
     }
 
     /**
      * Update an existing privileged (admin) Active Directory user account.
-     * (Assumes $data contains camelCase keys from update validation)
+     * (Assumes $data contains snake_case keys from update validation)
      *
+     * @param LdapUser $adminUser The admin user LdapUser object
      * @param array $data Validated data from UpdateUserRequest
      * @return LdapUser
      */
-    public function updateAdminUser(array $data): array
+    public function updateAdminUser(LdapUser $adminUser, array $data): array
     {
-        $domain = $data['domain'];
-        // Find admin user based on the *new* badge number
-        $baseSam = $data['badgeNumber'];
-        $adminSam = "{$baseSam}-a";
-
-        // We must find the admin user based on the *original* samaccountname from the path
-        $originalBaseSam = $data['samaccountname'];
-        $originalAdminSam = "{$originalBaseSam}-a";
-
-        $cn = "admin-".strtolower($data['firstName'].$data['lastName']);
-
-        Log::info("Updating admin account '{$originalAdminSam}' to '{$adminSam}' in domain '{$domain}'");
+        $originalAdminSam = $adminUser->samaccountname[0]; // Get from object
+        Log::info("Updating admin account '{$originalAdminSam}' in domain '{$data['domain']}' via protected method.");
 
         try {
-            $adminUser = $this->findUserBySamAccountName($originalAdminSam, $domain);
-            if (!$adminUser) {
-                // This could happen if admin account was deleted manually.
-                // We'll log a warning but not fail the whole standard user update.
-                Log::warning("Admin user '{$originalAdminSam}' not found. Cannot update.");
-                return ['user' => null];
-            }
-
-            // --- Update Attributes (mirroring createAdminUser) ---
-            $adminUser->samaccountname       = $adminSam;
-            $adminUser->userprincipalname    = $adminSam.'@'.$domain;
-            $adminUser->cn                   = $cn;
-            $adminUser->displayname          = $cn;
-            $adminUser->givenname            = Str::title($data['firstName']);
-            $adminUser->sn                   = Str::title($data['lastName']);
-            $adminUser->accountExpires       = Carbon::now()->addMonth()->timestamp; // Admin accounts expire
-
-            $adminUser->save();
-
-            // --- Group Logic (Add-Only) ---
-            // Add to any optional groups passed in the request
-            $arrPrivilegeGroups = $data['optionalGroupsForHighPrivilegeUsers'] ?? null;
-            if (is_array($arrPrivilegeGroups) && !empty($arrPrivilegeGroups)) {
-                foreach ($arrPrivilegeGroups as $privilegeGroup) {
-                    $this->addUserToGroup($domain, $adminUser, $privilegeGroup);
-                }
-            }
-
-            // --- START: Ensure user is in default privilege group ---
-            try {
-                $groupTemplate = config('keystone.provisioning.ouPrivilegeUserGroup');
-                if ($groupTemplate) {
-                    $defaultPrivilegeGroupDn = $this->resolveDnTemplate($groupTemplate, $domain);
-                    Log::info("Checking admin user membership in default privilege group: {$defaultPrivilegeGroupDn}");
-                    $this->addUserToGroup($domain, $adminUser, $defaultPrivilegeGroupDn);
-                } else {
-                    Log::warning("keystone.provisioning.ouPrivilegeUserGroup is not defined in config.");
-                }
-            } catch (\Exception $e) {
-                Log::error("Failed to add admin user to default privilege group during update: " . $e->getMessage());
-            }
-            // --- END: Add user to default privilege group from config ---
+            // --- Call the new protected method for the admin user ---
+            $adminUser = $this->updateAdUser($adminUser, $data, true);
 
             return ['user' => $adminUser];
 
@@ -723,9 +866,34 @@ class AdService
         Log::info("Disabling admin account '{$adminSam}' in domain '{$domain}'.");
         $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
         if ($adminUser) {
-            $this->disableAccount($domain, $adminSam);
+            $this->disableAccount($domain, $adminSam); // Re-use existing disable logic
         } else {
             Log::warning("Could not disable admin account '{$adminSam}', user not found.");
+        }
+    }
+
+    /**
+     * Delete a privileged admin account.
+     *
+     * @param string $domain
+     * @param string $adminSam
+     * @return void
+     */
+    public function deleteAdminAccount(string $domain, string $adminSam): void
+    {
+        Log::info("Deleting admin account '{$adminSam}' in domain '{$domain}'.");
+        $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
+        if ($adminUser) {
+            try {
+                $adminUser->delete();
+                Log::info("Admin account '{$adminSam}' deleted successfully.");
+            } catch (\Exception $e) {
+                Log::error("Failed to delete admin account '{$adminSam}': " . $e->getMessage());
+                // Re-throw exception to be caught by the controller
+                throw $e;
+            }
+        } else {
+            Log::warning("Could not delete admin account '{$adminSam}', user not found.");
         }
     }
 
@@ -746,19 +914,59 @@ class AdService
         }
 
         $dateOfBirth = $user->getFirstAttribute('info');
-        $accountExpiresTimestamp = $user->getFirstAttribute('accountExpires');
+        $accountExpiresValue = $user->getFirstAttribute('accountExpires');
         $accountExpires = 'Never';
 
-        if ($accountExpiresTimestamp && $accountExpiresTimestamp > 0 && $accountExpiresTimestamp != '9223372036854775807') {
+        // Check if LdapRecord already gave us a Carbon object
+        if ($accountExpiresValue instanceof \Carbon\Carbon) {
+            // It's a Carbon object. Check if it's a "never" date.
+            // LDAP "never" dates are often far in the future or near epoch '0'.
+            if ($accountExpiresValue->year > 9000 || $accountExpiresValue->timestamp < 1) {
+                $accountExpires = 'Never';
+            } else {
+                $accountExpires = $accountExpiresValue->toDateString();
+            }
+        } 
+        // Check for the raw numeric/string values (the original logic)
+        else if (is_numeric($accountExpiresValue) && $accountExpiresValue > 0 && $accountExpiresValue != '9223372036854775807') {
             try {
-                // Convert Windows FileTime (100-nanosecond intervals since Jan 1, 1601) to Unix timestamp
-                $unixTimestamp = ($accountExpiresTimestamp / 10000000) - 11644473600;
+                // It's a raw Windows FileTime. Convert it.
+                $unixTimestamp = ($accountExpiresValue / 10000000) - 11644473600;
                 $accountExpires = Carbon::createFromTimestamp($unixTimestamp)->toDateString();
             } catch (\Exception $e) {
-                Log::warning("Could not parse accountExpires timestamp '{$accountExpiresTimestamp}' for user '{$samAccountName}'");
+                Log::warning("Could not parse accountExpires timestamp '{$accountExpiresValue}' for user '{$samAccountName}'");
                 $accountExpires = 'Invalid Date';
             }
         }
+        // *** END FIX ***
+
+        // --- START: Logic modification for admin groups ---
+
+        // 1. Determine if an admin account exists
+        $hasAdminAccount = str_ends_with($samAccountName, '-a')
+                                ? false // Admin accounts don't have *other* admin accounts
+                                : $this->checkIfAdminAccountExists($domain, $samAccountName);
+
+        // 2. Get the default memberOf from the *standard* user first (Reverted change)
+        $memberOf = $user->groups()->get()->pluck('distinguishedname')->flatten()->filter()->all();
+
+        // 3. (ADJUSTMENT) Add a new key 'memberOfAdmin' if admin account exists
+        $memberOfAdmin = []; // Default to empty array
+        if ($hasAdminAccount) {
+            $adminSam = $samAccountName . '-a';
+            $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
+
+            if ($adminUser) {
+                Log::info("User '{$samAccountName}' has admin account. Fetching groups for '{$adminSam}'.");
+                // Populate the new array with admin groups
+                $memberOfAdmin = $adminUser->groups()->get()->pluck('distinguishedname')->flatten()->filter()->all();
+            } else {
+                // This case is unlikely if $hasAdminAccount is true, but good to handle.
+                Log::warning("User '{$samAccountName}' hasAdminAccount=true, but admin user '{$adminSam}' could not be found to fetch groups.");
+                // $memberOfAdmin remains an empty array
+            }
+        }
+        // --- END: Logic modification for admin groups ---
 
 
         return [
@@ -770,116 +978,60 @@ class AdService
             'emailAddress' => $user->getFirstAttribute('mail'),
             'dateOfBirth' => $dateOfBirth, // 'info' attribute
             'mobileNumber' => $user->getFirstAttribute('mobile'),
-            'badgeExpirationDate' => $accountExpires,
+            'badgeExpirationDate' => $accountExpires, // Use the new, safer variable
             'isEnabled' => $user->isEnabled(),
             'isLockedOut' => ($user->getFirstAttribute('lockouttime') > 0) ? true : false,
-            'memberOf' => $user->groups()->get()->pluck('samaccountname')->flatten()->all(),
-            'hasAdminAccount' => str_ends_with($samAccountName, '-a')
-                                    ? false // Admin accounts don't have *other* admin accounts
-                                    : $this->checkIfAdminAccountExists($domain, $samAccountName)
+            'memberOf' => $memberOf, // This is now correctly the *standard* user's groups
+            'memberOfAdmin' => $memberOfAdmin, // This new field holds the admin groups
+            'hasAdminAccount' => $hasAdminAccount
         ];
-    }
-
-    /**
-     * Converts a Y-m-d date string to an AD-compatible timestamp (Windows FileTime).
-     *
-     * @param string $dateString (Y-m-d)
-     * @return string
-     */
-    private function convertDateToAdTimestamp(string $dateString): string
-    {
-        try {
-            // Parse the date and set to end of day
-            $carbonDate = Carbon::parse($dateString)->endOfDay();
-            // Convert to Unix timestamp
-            $unixTimestamp = $carbonDate->timestamp;
-            // Convert to Windows FileTime (100-nanosecond intervals since Jan 1, 1601)
-            $fileTime = ($unixTimestamp + 11644473600) * 10000000;
-            return (string)$fileTime;
-        } catch (\Exception $e) {
-            Log::error("Failed to convert date '{$dateString}' to AD timestamp: " . $e->getMessage());
-            // Fallback to a distant future date (approx 2038)
-            return '21474836470000000';
-        }
     }
 
     /**
      * List users based on filters.
      *
-     * @param string $domain
+     * @param string $searcg
      * @param string|null $nameFilter
      * @param bool|null $statusFilter
      * @param bool|null $hasAdminAccount
      * @return array
      */
-    public function listUsers(string $domain, ?string $nameFilter, ?bool $statusFilter, ?bool $hasAdminAccount): array
+    public function listUsers(?string $domainFilter = null, ?string $nameFilter = null): array
     {
-        $query = $this->newQuery($domain);
-
-        // Define OUs to search from config
         $searchOus = config('keystone.provisioning.searchBaseOus', []);
+        $formattedOus = array_map(fn($ou) => $this->resolveDnTemplate($ou, $domainFilter), $searchOus);
+        
+        $finalUsers = collect();
 
-        $formattedOus = array_map(fn($ou) => $this->resolveDnTemplate($ou, $domain), $searchOus);
-
-        $users = collect();
-
-        if (!empty($formattedOus)) {
-            foreach ($formattedOus as $ou) {
-                $subQuery = clone $query;
-                $subQuery->in($ou);
-
-                if (!empty($nameFilter)) {
-                    $subQuery->where('displayname', 'contains', $nameFilter);
-                }
-
-                if ($statusFilter !== null) {
-                    $statusFilter ? $subQuery->whereEnabled() : $subQuery->whereDisabled();
-                }
-
-                $users = $users->merge($subQuery->paginate(100));
+        foreach ($formattedOus as $formattedOu) {
+            $query = LdapUser::in($formattedOu);
+            
+            if ($nameFilter) {
+                $query->where('anr', '=', $nameFilter);
             }
-        } else {
-            // fallback to default query if no OUs configured
-            if (!empty($nameFilter)) {
-                $query->where('displayname', 'contains', $nameFilter);
-            }
+            
+            $extractedInfo = $query->get()->map(function ($ldapUser) use ($domainFilter) {
+                preg_match_all('/DC=([^,]+)/i', $ldapUser->getDn(), $matches);
+                $domain = implode('.', $matches[1] ?? []);
 
-            if ($statusFilter !== null) {
-                $statusFilter ? $query->whereEnabled() : $query->whereDisabled();
-            }
+                return [
+                    'displayName' => $ldapUser->getName(),
+                    'domain' => $domain,
+                    'isEnabled' => $ldapUser->isEnabled(),
+                    'samAccountName' => $ldapUser->getFirstAttribute('userprincipalname'),
+                    'accountExpires' => $this->convertDateToTimestamp($ldapUser->getFirstAttribute('accountexpires')),
+                    'hasAdminAccount' => $this->checkIfAdminAccountExists($domain, $ldapUser->getFirstAttribute('samaccountname'))
+                ];
+            });            
 
-            $users = $query->paginate(100);
+            $finalUsers = $finalUsers->merge($extractedInfo);
+        }
+        
+        if ($domainFilter) {
+            $finalUsers = $finalUsers->where('domain', $domainFilter);
         }
 
-        // Remove duplicates if search OUs overlap
-        $users = $users->unique(function ($user) {
-            return $user->getConvertedSid();
-        });
-
-        // Map results
-        $userList = [];
-        foreach ($users as $user) {
-            $sam = $user->getFirstAttribute('samaccountname');
-            // Skip admin accounts from this list
-            if (Str::endsWith($sam, '-a')) {
-                continue;
-            }
-
-            $adminExists = $this->checkIfAdminAccountExists($domain, $sam);
-
-            if ($hasAdminAccount !== null && $adminExists !== $hasAdminAccount) {
-                continue;
-            }
-
-            $userList[] = [
-                'samAccountName'  => $sam,
-                'displayName'     => $user->getFirstAttribute('displayname'),
-                'isEnabled'       => $user->isEnabled(),
-                'hasAdminAccount' => $adminExists,
-            ];
-        }
-
-        return $userList;
+        return $finalUsers->values()->all();
     }
 
     /**
@@ -966,4 +1118,3 @@ class AdService
 
 
 }
-

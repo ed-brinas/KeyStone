@@ -24,6 +24,25 @@ class UserController extends Controller
     }
 
     /**
+    * @OA\Get(
+    * path="/api/config",
+    * summary="Get configuration details",
+    * description="Provides domain and optional group configuration details used for user management.",
+    * tags={"Users"},
+    * @OA\Response(response=200, description="Configuration retrieved successfully")
+    * )
+    */
+    public function getConfig()
+    {
+        // Use the new keystone.php configuration keys
+        return response()->json([
+            'domains' => config('keystone.adSettings.domains', []),
+            'optionalGroupsForStandard' => config('keystone.provisioning.optionalGroupsForStandardUser', []),
+            'optionalGroupsForHighPrivilege' => config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', []),
+        ]);
+    }   
+
+    /**
      * @OA\Get(
      * path="/api/v1/users",
      * summary="List AD users by domain",
@@ -31,8 +50,6 @@ class UserController extends Controller
      * security={{"sanctum": {}}},
      * @OA\Parameter(name="domain", in="query", required=true, description="Domain name to filter users (e.g. ncc.lab)", @OA\Schema(type="string", example="ncc.lab")),
      * @OA\Parameter(name="name", in="query", required=false, description="Filter by display name contains", @OA\Schema(type="string", example="John")),
-     * @OA\Parameter(name="status", in="query", required=false, description="Enabled status filter", @OA\Schema(type="boolean", example=true)),
-     * @OA\Parameter(name="admin", in="query", required=false, description="Has admin account filter", @OA\Schema(type="boolean", example=false)),
      * @OA\Response(response=200, description="List of users"),
      * @OA\Response(response=403, description="Unauthorized"),
      * @OA\Response(response=422, description="Validation error")
@@ -42,6 +59,7 @@ class UserController extends Controller
     {
         // --- Authorization ---
         $authUser = Auth::user();
+        
         if (!$authUser->hasGeneralAccess && !$authUser->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
@@ -55,21 +73,16 @@ class UserController extends Controller
         // --- Validation ---
         $validator = Validator::make($request->all(), [
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
-            'name' => 'nullable|string',
-            'status' => 'nullable|boolean',
-            'admin' => 'nullable|boolean',
+            'nameFilter' => 'nullable|string'
         ]);
+
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
+
         $data = $validator->validated();
 
-        $users = $this->adService->listUsers(
-            $data['domain'],
-            $data['name'] ?? null,
-            isset($data['status']) ? (bool)$data['status'] : null,
-            isset($data['admin']) ? (bool)$data['admin'] : null
-        );
+        $users = $this->adService->listUsers($data['domain'] ?? null,$data['nameFilter'] ?? null);
 
         return response()->json($users);
     }
@@ -166,9 +179,9 @@ class UserController extends Controller
             'badge_number' => ['required', 'string', 'regex:/^[0-9]+$/'],
             'first_name' => 'required|string',
             'last_name' => 'required|string',
-            'mobile_number' => ['required', 'string', 'regex:/^\+[0-9]+$/'],
+            'mobile_number' => ['required', 'string', 'regex:/^(\+|0)[0-9]+$/'],
             'date_of_birth' => ['required', 'date_format:Y-m-d','before_or_equal:-18 years'],
-            'badge_expiration_date' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
+            'date_of_expiry' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
             'has_admin' => 'boolean',
             'groups_standard_user' => 'array',
             'groups_privilege_user' => 'array',
@@ -255,34 +268,34 @@ class UserController extends Controller
     * name="samaccountname",
     * in="path",
     * required=true,
-    * description="The user's CURRENT SAM account name (AD username)",
-    * @OA\Schema(type="string", example="jdoe")
+    * description="The user's CURRENT SAM account name (AD username). This parameter is part of the URL but the service logic will use 'badge_number' from the payload as the primary key.",
+    * @OA\Schema(type="string", example="118155")
     * ),
     *
     * @OA\RequestBody(
     * required=true,
     * @OA\JsonContent(
     * required={
-    * "domain", "badgeNumber", "firstName", "lastName",
-    * "mobileNumber", "dateOfBirth", "badgeExpirationDate"
+    * "domain", "badge_number", "first_name", "last_name",
+    * "mobile_number", "date_of_birth", "date_of_expiry"
     * },
-    * @OA\Property(property="domain", type="string", example="corp.example.com"),
-    * @OA\Property(property="badgeNumber", type="string", example="123457", description="The NEW or current badge number (becomes the new samaccountname)"),
-    * @OA\Property(property="firstName", type="string", example="John"),
-    * @OA\Property(property="lastName", type="string", example="Doe"),
-    * @OA\Property(property="mobileNumber", type="string", example="+15551234567"),
-    * @OA\Property(property="dateOfBirth", type="string", format="date", example="1985-06-15"),
-    * @OA\Property(property="badgeExpirationDate", type="string", format="date", example="2027-06-15"),
-    * @OA\Property(property="createAdminAccount", type="boolean", example=false, description="Set to true to create or update the associated admin account"),
+    * @OA\Property(property="domain", type="string", example="ncc.lab"),
+    * @OA\Property(property="badge_number", type="string", example="123756391", description="The SAM account name of the user to update. This is the primary key for the update operation."),
+    * @OA\Property(property="first_name", type="string", example="Jane"),
+    * @OA\Property(property="last_name", type="string", example="Doe"),
+    * @OA\Property(property="mobile_number", type="string", example="0556984261"),
+    * @OA\Property(property="date_of_birth", type="string", format="date", example="1984-01-25"),
+    * @OA\Property(property="date_of_expiry", type="string", format="date", example="2027-12-31"),
+    * @OA\Property(property="has_admin", type="boolean", example=false, description="Set to true to create or update the associated admin account"),
     * @OA\Property(
-    * property="optionalGroupsForStandardUser",
+    * property="groups_standard_user",
     * type="array",
-    * @OA\Items(type="string", example="CN=IT-Support,OU=Groups,DC=corp,DC=example,DC=com")
+    * @OA\Items(type="string", example="CN=RDP-EMS,CN=Users,DC=ncc,DC=lab")
     * ),
     * @OA\Property(
-    * property="optionalGroupsForHighPrivilegeUsers",
+    * property="groups_privilege_user",
     * type="array",
-    * @OA\Items(type="string", example="CN=Domain-Admins,OU=Groups,DC=corp,DC=example,DC=com")
+    * @OA\Items(type="string", example="CN=L3,CN=Users,dc=ncc,dc=lab")
     * )
     * )
     * ),
@@ -305,14 +318,14 @@ class UserController extends Controller
     * response=404,
     * description="User not found",
     * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="User not found.")
+    * @OA\Property(property="message", type="string", example="User '123756391' not found in domain 'ncc.lab'.")
     * )
     * ),
     * @OA\Response(
     * response=422,
     * description="Validation failed",
     * @OA\JsonContent(
-    * @OA\Property(property="errors", type="object", example={"badgeNumber": {"The badgeNumber field is required."}})
+    * @OA\Property(property="errors", type="object", example={"badge_number": {"The badge_number field is required."}})
     * )
     * ),
     * @OA\Response(
@@ -327,30 +340,29 @@ class UserController extends Controller
     */
     public function update(Request $request, string $samaccountname): JsonResponse
     {
+        // Use $authUser to avoid conflict with $user variable from service
         $authUser = Auth::user();
 
-        // --- Authorization ---
         if (!$authUser->hasGeneralAccess && !$authUser->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 
-        // --- Validation ---
-        // Note: Validation keys (camelCase) differ from store() (snake_case)
+        // --- Validation (use snake_case, matches 'store' method) ---
         $validator = Validator::make($request->all(), [
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
-            'badgeNumber' => ['required', 'string', 'regex:/^[0-9]+$/'],
-            'firstName' => 'required|string',
-            'lastName' => 'required|string',
-            'mobileNumber' => ['required', 'string', 'regex:/^\+[0-9]+$/'],
-            'dateOfBirth' => ['required', 'date_format:Y-m-d','before_or_equal:-18 years'],
-            'badgeExpirationDate' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
-            'createAdminAccount' => 'boolean',
-            'optionalGroupsForStandardUser' => 'array',
-            'optionalGroupsForHighPrivilegeUsers' => 'array',
+            'badge_number' => ['required', 'string', 'regex:/^[0-9]+$/'],
+            'first_name' => 'required|string',
+            'last_name' => 'required|string',
+            'mobile_number' => ['required', 'string', 'regex:/^(\+|0)[0-9]+$/'],
+            'date_of_birth' => ['required', 'date_format:Y-m-d','before_or_equal:-18 years'],
+            'date_of_expiry' => ['required', 'date_format:Y-m-d','after:today','after_or_equal:+3 months'],
+            'has_admin' => 'boolean',
+            'groups_standard_user' => 'array',
+            'groups_privilege_user' => 'array',
         ]);
 
-        $validator->sometimes('optionalGroupsForHighPrivilegeUsers', 'required|array|min:1', function ($input) {
-            return !empty($input->createAdminAccount);
+        $validator->sometimes('groups_privilege_user', 'required|array|min:1', function ($input) {
+            return !empty($input->has_admin);
         });
 
         if ($validator->fails()) {
@@ -358,37 +370,66 @@ class UserController extends Controller
         }
 
         $data = $validator->validated();
-        $data['createAdminAccount'] = !empty($data['createAdminAccount']); // Ensure boolean
+        $data['has_admin'] = !empty($data['has_admin']); // Ensure boolean
 
-        // --- Enforce Role Permissions for Admin Account ---
-        if ($data['createAdminAccount'] && !$authUser->hasHighPrivilegeAccess) {
+        // --- Enforce Role Permissions ---
+        if ($data['has_admin'] && !$authUser->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'Unauthorized to create or update admin accounts.'], 403);
         }
 
-        // --- Check if new samaccountname already exists (if it's different from the current one) ---
-        $newSam = $data['badgeNumber'];
-        if ($newSam !== $samaccountname && $this->adService->findUserBySamAccountName($newSam, $data['domain'])) {
-            return response()->json(['message' => "Another user with badge number '{$newSam}' already exists."], 409); // 409 Conflict
-        }
+        // --- BUG FIX: Removed duplicated, conflicting camelCase validation block ---
 
-        // Add the current samaccountname (from URL) to the data array
-        $data['samaccountname'] = $samaccountname;
-
-        // Pass auth context to service
+        // Pass auth context to service and the original samaccountname
         $data['hasGeneralAccess'] = $authUser->hasGeneralAccess;
-        $data['hasHighPrivilegeAccess'] = $authUser->hasHighPrivilegeAccess;
+        $data['hasHighPrivilegeAccess'] = $authUser->hasHighPrivilegeAccess; // <-- FIX: Was HighPrivilegeAccess
+        // The $samaccountname from the URL is passed here but will be ignored by AdService->updateUser
+        // in favor of $data['badge_number'] as per the new logic.
+        $data['current_samaccountname'] = $samaccountname; 
 
         try {
             $result = $this->adService->updateUser($data);
-            return response()->json([
+
+            // --- Build detailed response ---
+            $response = [
                 'message' => 'User updated successfully.',
-                'user' => $result['user'] ? $result['user']->samaccountname[0] : null,
-                'admin_result' => $result['admin_result'] ? 'Admin account processed.' : 'No admin action taken.'
-            ]);
+                'standard_user' => [
+                    'username' => $result['user'] ? $result['user']->samaccountname[0] : null,
+                ]
+            ];
+
+            $adminResult = $result['admin_result'];
+            $adminResponse = [
+                'status' => 'none',
+                'username' => null,
+            ];
+
+            if (is_array($adminResult)) {
+                if (isset($adminResult['user']) && isset($adminResult['initialPassword'])) {
+                    // Case: Admin account was CREATED
+                    $adminResponse['status'] = 'created';
+                    $adminResponse['username'] = $adminResult['user'] ? $adminResult['user']->samaccountname[0] : $data['badge_number'].'-a';
+                    $adminResponse['password'] = $adminResult['initialPassword'];
+                } elseif (isset($adminResult['user'])) {
+                    // Case: Admin account was UPDATED
+                    $adminResponse['status'] = 'updated';
+                    $adminResponse['username'] = $adminResult['user'] ? $adminResult['user']->samaccountname[0] : $data['badge_number'].'-a';
+                } elseif (isset($adminResult['message'])) {
+                    // Case: Admin account was DISABLED
+                    $adminResponse['status'] = 'disabled';
+                    $adminResponse['message'] = $adminResult['message'];
+                }
+            }
+
+            $response['admin_account'] = $adminResponse;
+            // --- End build detailed response ---
+
+            return response()->json($response); // Return the new detailed response
+
         } catch (ModelNotFoundException $e) {
-            return response()->json(['message' => 'User not found.'], 404);
+            // The service will throw this if the user from 'badge_number' isn't found
+            return response()->json(['message' => $e->getMessage()], 404);
         } catch (\Exception $e) {
-            \Log::error("User update failed for '{$samaccountname}': " . $e->getMessage());
+            \Log::error("User update failed for '{$data['badge_number']}': " . $e->getMessage());
             return response()->json(['message' => 'Failed to update user: ' . $e->getMessage()], 500);
         }
     }
@@ -582,4 +623,3 @@ class UserController extends Controller
         }
     }
 }
-

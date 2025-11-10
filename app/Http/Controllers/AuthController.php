@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 
 /**
 * @OA\Tag(name="Authentication", description="User authentication and logout endpoints.")
@@ -131,4 +132,32 @@ class AuthController extends Controller
         $request->user()->currentAccessToken()->delete();
         return response()->json([], 204);
     }
+
+    /**
+    * @OA\Get(
+    * path="/api/me",
+    * summary="Get authenticated user's information",
+    * description="Returns information about the currently authenticated user.",
+    * tags={"Authentication"},
+    * security={{"bearerAuth":{}}},
+    * @OA\Response(response=200, description="Authenticated user info returned"),
+    * @OA\Response(response=401, description="User not authenticated")
+    * )
+    */
+    public function me()
+    {
+        if (!Auth::check()) {
+            return response()->json(['message' => 'User is not authenticated.'], 401);
+        }
+
+        $user = Auth::user();
+
+        return response()->json([
+            'displayName' => $user->name,
+            'mail' => $user->email,
+            'hasGeneralAccess' => $user->hasGeneralAccess,
+            'hasHighPrivilegeAccess' => $user->hasHighPrivilegeAccess,
+        ]);
+
+    }    
 }
