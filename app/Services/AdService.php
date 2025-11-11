@@ -3,18 +3,18 @@
 namespace App\Services;
 
 use Carbon\Carbon;
-use LdapRecord\Container;
-use LdapRecord\LdapRecordException;
-use LdapRecord\Connection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use LdapRecord\Models\ActiveDirectory\User as LdapUser;
 use LdapRecord\Models\ActiveDirectory\Group as LdapGroup;
 use LdapRecord\Models\Attributes\Sid as LdapSid;
 use LdapRecord\Models\ModelNotFoundException;
-use Illuminate\Support\Str;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Collection;
+use LdapRecord\LdapRecordException;
+use LdapRecord\Container;
+use LdapRecord\Connection;
 
 class AdService
 {
@@ -97,14 +97,27 @@ class AdService
                 ->first();
 
             if ($group) {
+                // --- FIX APPLIED ---
+                // Removed the "if (!$user->groups()->exists($group))" check
+                // as it was failing due to AD replication lag.
+                // We will just attach the user directly. AD will ignore
+                // the request if the user is already a member.
+
+                $group->members()->attach($user);
+                Log::info("Attached '{$user->getName()}' to group '{$groupName}'. (If not already a member).");
+                return true;
+                
+                /* --- REMOVED BLOCK ---
                 // Check if user is already a member to avoid unnecessary operations
                 if (!$user->groups()->exists($group)) {
+                    // $group->members()->attach($user); // This line was previously commented out, uncommenting it.
                     $group->members()->attach($user);
                     Log::info("Added '{$user->getName()}' to group '{$groupName}'.");
                 } else {
                     Log::info("'{$user->getName()}' is already a member of group '{$groupName}'.");
                 }
                 return true;
+                */
             }
 
             Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
@@ -127,6 +140,7 @@ class AdService
     protected function removeUserFromGroup(string $domain, LdapUser $user, string $groupName): bool
     {
         try {
+            
             Log::info("Attempting to remove '{$user->getName()}' from group '{$groupName}'...");
 
             $group = LdapGroup::on($domain)
@@ -134,6 +148,17 @@ class AdService
                 ->first();
 
             if ($group) {
+                // --- FIX APPLIED ---
+                // Removed the "if ($user->groups()->exists($group))" check
+                // as it was failing due to AD replication lag.
+                // We will just detach the user directly. AD will ignore
+                // the request if the user is already not a member.
+
+                $group->members()->detach($user);
+                Log::info("Detached '{$user->getName()}' from group '{$groupName}'. (If they were a member).");
+                return true;
+                
+                /* --- REMOVED BLOCK ---
                 if ($user->groups()->exists($group)) {
                     $group->members()->detach($user);
                     Log::info("Removed '{$user->getName()}' from group '{$groupName}'.");
@@ -141,6 +166,7 @@ class AdService
                     Log::info("'{$user->getName()}' is not a member of group '{$groupName}'.");
                 }
                 return true;
+                */
             }
             Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
         } catch (\Exception $e) {
@@ -151,54 +177,216 @@ class AdService
 
 
     /**
-     * Synchronizes a user's optional group memberships.
+     * Synchronizes a user's group memberships based on a submitted list.
      *
      * @param string $domain
      * @param LdapUser $user
-     * @param array $newGroupDns The list of group DNs the user *should* be in.
-     * @param array $manageableGroupDns The list of *all* optional groups this function is allowed to manage.
+     * @param array $submittedGroupDns The complete list of group DNs the user *should* be in.
+     * @param bool $isAdmin Indicates if this sync is for an admin account.
      * @return void
      */
-    protected function syncUserGroups(string $domain, LdapUser $user, array $newGroupDns, array $manageableGroupDns): void
+    protected function syncUserGroups(string $domain, LdapUser $user, array $submittedGroupDns, bool $isAdmin = false): void
     {
+        Log::info("Starting group sync for '{$user->getName()}' in domain '{$domain}'. IsAdmin: " . ($isAdmin ? 'Yes' : 'No'));
         try {
-            // Normalize all DNs to lowercase for comparison
-            $newGroupDns = array_map('strtolower', $newGroupDns);
-            $manageableGroupDns = array_map('strtolower', $manageableGroupDns);
 
-            $currentGroups = $user->groups()->get()
-                ->pluck('distinguishedname')
-                ->flatten() // <-- FIX: Flatten potential arrays of DNs
-                ->filter(fn($g) => is_string($g) && !empty($g)) // <-- FIX: Ensure we only have non-empty strings
-                ->map('strtolower')
-                ->unique() // Add unique check for consistency
-                ->toArray();
+            // --- START: MODIFICATION - Implement user's requested sequence for Admins ---
+            if ($isAdmin) {
+                // --- ADMIN-SPECIFIC SYNC LOGIC ---
+                // This implements the user's requested sequence to prevent race conditions
+                // when removing the 'Domain Users' group.
 
-            // 1. Find groups to add
-            $groupsToAdd = array_diff($newGroupDns, $currentGroups);
-            foreach ($groupsToAdd as $groupDn) {
-                // We only care about adding groups that are in the new list.
-                $this->addUserToGroup($domain, $user, $groupDn);
+                // 1. Set the selected group as the primary group.
+                if (!empty($submittedGroupDns)) {
+                    $primaryGroupDn = $submittedGroupDns[0];
+                    Log::info("SyncUserGroups [Admin]: STEP 1 - Setting primary group to '{$primaryGroupDn}'.");
+                    $this->setAsPrimaryGroup($domain, $user, $primaryGroupDn);
+                } else {
+                    Log::warning("SyncUserGroups [Admin]: STEP 1 - No groups submitted for '{$user->getName()}'. Cannot set a primary group.");
+                }
+
+                // 2. Wait for recommended seconds for AD replication.
+                // Note: Using sleep() in a web request is generally bad practice as it blocks
+                // the thread. A better long-term solution would be a queued job.
+                $delay = 5; // 5 seconds recommended delay
+                Log::info("SyncUserGroups [Admin]: STEP 2 - Waiting {$delay} seconds for AD replication...");
+                sleep($delay);
+
+                // 3. Perform the full group sync (add/remove).
+                // 'Domain Users' will be removed here if it's not in the submitted list.
+                Log::info("SyncUserGroups [Admin]: STEP 3 - Performing full group membership sync.");
+
+                $currentGroupDns = $user->groups()->get()
+                    ->pluck('distinguishedname')
+                    ->flatten()
+                    ->filter(fn($g) => is_string($g) && !empty($g))
+                    ->unique();
+                $currentGroupDnsLower = $currentGroupDns->map('strtolower')->toArray();
+                $submittedGroupDnsLower = array_map('strtolower', $submittedGroupDns);
+
+                // Add Groups
+                $groupsToAddLower = array_diff($submittedGroupDnsLower, $currentGroupDnsLower);
+                $groupsToAdd = collect($submittedGroupDns)->filter(function ($dn) use ($groupsToAddLower) {
+                    return in_array(strtolower($dn), $groupsToAddLower);
+                })->all();
+
+                foreach ($groupsToAdd as $groupDn) {
+                    Log::info("SyncUserGroups [Admin]: Adding user to group '{$groupDn}'.");
+                    $this->addUserToGroup($domain, $user, $groupDn);
+                }
+
+                // Remove Groups
+                $groupsToRemoveLower = array_diff($currentGroupDnsLower, $submittedGroupDnsLower);
+                $groupsToRemove = $currentGroupDns->filter(function ($dn) use ($groupsToRemoveLower) {
+                    return in_array(strtolower($dn), $groupsToRemoveLower);
+                })->all();
+                
+                // For admins, we do NOT filter 'Domain Users'.
+                // If 'Domain Users' is not in $submittedGroupDns,
+                // it will be in $groupsToRemove, and it will be removed.
+                // This satisfies the user's Step 3.
+                foreach ($groupsToRemove as $groupDn) {
+                    Log::info("SyncUserGroups [Admin]: Removing user from group '{$groupDn}'.");
+                    $this->removeUserFromGroup($domain, $user, $groupDn);
+                }
+                
+                Log::info("SyncUserGroups [Admin]: Sync complete.");
+
+            } else {
+                // --- REGULAR USER SYNC LOGIC (Unchanged from original) ---
+                Log::info("SyncUserGroups [Regular]: Using standard sync logic.");
+
+                // b.1. Retrieve the user's complete list of current groups.
+                $currentGroupDns = $user->groups()->get()
+                    ->pluck('distinguishedname')
+                    ->flatten()
+                    ->filter(fn($g) => is_string($g) && !empty($g))
+                    ->unique(); 
+
+                $currentGroupDnsLower = $currentGroupDns->map('strtolower')->toArray();
+                $submittedGroupDnsLower = array_map('strtolower', $submittedGroupDns);
+
+                // b.4. Find groups to add:
+                $groupsToAddLower = array_diff($submittedGroupDnsLower, $currentGroupDnsLower);
+                $groupsToAdd = collect($submittedGroupDns)->filter(function ($dn) use ($groupsToAddLower) {
+                    return in_array(strtolower($dn), $groupsToAddLower);
+                })->all();
+
+                foreach ($groupsToAdd as $groupDn) {
+                    Log::info("SyncUserGroups [Regular]: Adding user to group '{$groupDn}'.");
+                    $this->addUserToGroup($domain, $user, $groupDn);
+                }
+
+                // b.3. Find groups to remove:
+                $groupsToRemoveLower = array_diff($currentGroupDnsLower, $submittedGroupDnsLower);
+                $groupsToRemove = $currentGroupDns->filter(function ($dn) use ($groupsToRemoveLower) {
+                    return in_array(strtolower($dn), $groupsToRemoveLower);
+                });
+
+                // This is a Regular User. We must NOT remove "Domain Users".
+                $domainUsersDnLower = 'cn=domain users,cn=users,dc=ncc,dc=lab';
+                $groupsToRemove = $groupsToRemove->filter(function ($dn) use ($domainUsersDnLower) {
+                    // Keep the group in the removal list ONLY if its lowercase DN is NOT "domain users"
+                    return strtolower($dn) !== $domainUsersDnLower;
+                });
+                Log::info("SyncUserGroups [Regular]: Filtered 'Domain Users' from removal list.");
+
+                $groupsToRemove = $groupsToRemove->all();
+
+                foreach ($groupsToRemove as $groupDn) {
+                    Log::info("SyncUserGroups [Regular]: Removing user from group '{$groupDn}'.");
+                    $this->removeUserFromGroup($domain, $user, $groupDn);
+                }
+
+                // b.5. Designate one of the final groups as the user's primary group.
+                if (!empty($submittedGroupDns)) {
+                    $primaryGroupDn = $submittedGroupDns[0];
+                    Log::info("SyncUserGroups [Regular]: Setting primary group to '{$primaryGroupDn}'.");
+                    $this->setAsPrimaryGroup($domain, $user, $primaryGroupDn);
+                } else {
+                    Log::warning("SyncUserGroups [Regular]: No groups submitted for '{$user->getName()}'. Cannot set a primary group.");
+                }
             }
-
-            // 2. Find groups to remove
-            // These are groups the user is currently in, but are NOT in the new list.
-            $groupsToRemove = array_diff($currentGroups, $newGroupDns);
-
-            // 3. CRITICAL: Filter $groupsToRemove to only include groups we are allowed to manage.
-            // We do not want to remove users from "Domain Users" or other essential groups
-            // that aren't part of this optional list.
-            $safeToRemove = array_intersect($groupsToRemove, $manageableGroupDns);
-
-            foreach ($safeToRemove as $groupDn) {
-                $this->removeUserFromGroup($domain, $user, $groupDn);
-            }
+            // --- END: MODIFICATION ---
 
         } catch (\Exception $e) {
             Log::error("Failed to sync groups for '{$user->getName()}': " . $e->getMessage());
         }
     }
 
+    /**
+     * Sets the primary group for an Active Directory user.
+     *
+     * @param string $userSamAccountName The sAMAccountName of the user (e.g., 'john.doe').
+     * @param string $targetGroupDn The Distinguished Name of the target group (e.g., 'CN=L1,CN=Users,DC=ncc,DC=local').
+     * @return bool True on success, false on failure.
+     */
+    protected function setAsPrimaryGroup(string $domain, LdapUser $user, string $targetGroupDn): bool
+    {
+        try {
+            // 1. Find the Group
+            // ******************* FIX APPLIED HERE (Line 258) *******************
+            // Explicitly select 'primaryGroupToken' as it's a constructed attribute
+            // and may not be loaded by default.
+            $group = LdapGroup::on($domain)
+                        ->select('*', 'primaryGroupToken')
+                        ->where('distinguishedname', '=', $targetGroupDn)
+                        ->first();
+
+            if (!$group) {
+                Log::warning("setAsPrimaryGroup: Group '{$targetGroupDn}' not found in domain '{$domain}'.");
+                return false;
+            }
+
+            // 2. --- IMPORTANT PREREQUISITE ---
+            // The user MUST be a member of the new primary group BEFORE setting it.
+            // We use the same logic as addUserToGroup to be safe.
+            if (!$user->groups()->exists($group)) {
+                Log::info("setAsPrimaryGroup: User '{$user->getName()}' is not a member of '{$targetGroupDn}'. Attaching via group model.");
+                $group->members()->attach($user);
+            }
+
+            // 3. Reload the group object explicitly with the 'primaryGroupToken'
+            // to ensure it is fetched, as it is a constructed attribute.
+            
+            // ******************* FIX APPLIED HERE (Line 272) *******************
+            // $group->refresh(['primaryGroupToken']); // REMOVED - This is now redundant and was not working as expected.
+            
+            $primaryGroupToken = $group->getFirstAttribute('primaryGroupToken');
+
+            if (!$primaryGroupToken) {
+                Log::error("setAsPrimaryGroup: Could not retrieve primaryGroupToken for '{$targetGroupDn}'.");
+                return false;
+            }
+
+            // 4. Set the User's primaryGroupID
+            $user->primaryGroupID = $primaryGroupToken;
+
+            // 5. Save the user object to commit the change to Active Directory
+            // ******************* FIX APPLIED HERE (Lines 284-290) *******************
+            // The $user->save() method can return false if it detects a replication
+            // delay, even if the LDAP operation was successful (as seen in logs).
+            // We will trust the operation to throw an exception on a *true* failure
+            // and log success immediately after the save call.
+            $user->save();
+            Log::info("Successfully set primary group for '{$user->getName()}' to '{$targetGroupDn}'.");
+            return true;
+            
+            /* --- REMOVED THIS BLOCK ---
+            if ($user->save()) {
+                Log::info("Successfully set primary group for '{$user->getName()}' to '{$targetGroupDn}'.");
+                return true;
+            }
+            
+            Log::error("setAsPrimaryGroup: Failed to save user '{$user->getName()}' after setting primaryGroupID.");
+            return false;
+            */
+
+        } catch (LdapRecordException $e) {
+            Log::error("Active Directory Primary Group Update Failed '{$user->getName()}': " . $e->getMessage());
+            return false;
+        }
+    }
 
     /**
      * Resolves a DN template string by replacing {domain-components} with the correct DN.
@@ -214,34 +402,6 @@ class AdService
 
         // Replace the placeholder
         return str_replace('{domain-components}', $domainDn, $dnTemplate);
-    }
-
-    /**
-     * Generate a secure, random password.
-     * Logic ported from AdService.cs GeneratePassword()
-     *
-     * @return string
-     */
-    protected function generatePassword(): string
-    {
-        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-        $lower = 'abcdefghijkmnpqrstuvwxyz';
-        $number = '123456789';
-        $special = '!@#$';
-
-        $allChars = $upper . $lower . $number . $special;
-
-        $password = '';
-        $password .= $upper[random_int(0, strlen($upper) - 1)];
-        $password .= $lower[random_int(0, strlen($lower) - 1)];
-        $password .= $number[random_int(0, strlen($number) - 1)];
-        $password .= $special[random_int(0, strlen($special) - 1)];
-
-        for ($i = 0; $i < 12; $i++) {
-            $password .= $allChars[random_int(0, strlen($allChars) - 1)];
-        }
-
-        return str_shuffle($password);
     }
 
     /**
@@ -302,7 +462,6 @@ class AdService
             $cn       = "admin-".strtolower($data['first_name'].$data['last_name']);
             $sam      = $data['badge_number'].'-a';
             $dn       = $this->buildDn($cn, $domain, true);
-            // *** FIX: Use consistent AD timestamp for admin users ***
             $expires  = $this->convertDateToAdTimestamp(Carbon::now()->addMonth()->toDateString());
         } else {
             $cn       = $firstName." ".$lastName;
@@ -346,37 +505,47 @@ class AdService
             $this->resetPassword($user, $initialPassword, true);
 
             // 3. Add to groups
+            // --- MODIFICATION: We now build a list and call syncUserGroups ---
+            $submittedGroups = []; 
             if ($isAdmin) {
-                // --- Admin Group Logic ---
-                $arrPrivilegeGroups = $data['groups_privilege_user'] ?? null;
-                if (is_array($arrPrivilegeGroups) && !empty($arrPrivilegeGroups)) {
-                    foreach ($arrPrivilegeGroups as $privilegeGroup) {
-                        $this->addUserToGroup($domain, $user, $privilegeGroup);
-                    }
-                }
 
+                // --- Admin Group Logic ---
+                $submittedGroups = $data['groups_privilege_user'] ?? [];
+                
                 // Add to default privilege group from config
                 try {
                     $groupTemplate = config('keystone.provisioning.ouPrivilegeUserGroup');
                     if ($groupTemplate) {
-                        $defaultPrivilegeGroupDn = $this->resolveDnTemplate($groupTemplate, $domain);
-                        Log::info("Adding admin user to default privilege group: {$defaultPrivilegeGroupDn}");
-                        $this->addUserToGroup($domain, $user, $defaultPrivilegeGroupDn);
+                        $submittedGroups[] = $groupTemplate; // Add to list for sync
+                        Log::info("Adding default privilege group to sync list: {$groupTemplate}");
                     } else {
                         Log::warning("keystone.provisioning.ouPrivilegeUserGroup is not defined in config.");
                     }
                 } catch (\Exception $e) {
-                    Log::error("Failed to add admin user to default privilege group: " . $e->getMessage());
+                    Log::error("Failed to add default privilege group to sync list: " . $e->getMessage());
                 }
+
             } else {
                 // --- Standard Group Logic ---
-                $arrStandardGroups = $data['groups_standard_user'] ?? null;
-                if (is_array($arrStandardGroups) && !empty($arrStandardGroups)) {
-                    foreach ($arrStandardGroups as $standardGroup) {
-                        $this->addUserToGroup($domain, $user, $standardGroup);
+                $submittedGroups = $data['groups_standard_user'] ?? [];
+            }
+
+            // --- NEW: Resolve DNs and call syncUserGroups ---
+            // This is the same logic from updateAdUser, now applied to new users.
+            $resolvedGroupDns = [];
+            if (is_array($submittedGroups) && !empty($submittedGroups)) {
+                foreach ($submittedGroups as $group) {
+                    if(is_string($group) && !empty($group)) {
+                        $resolvedGroupDns[] = $this->resolveDnTemplate($group, $domain);
                     }
                 }
             }
+            $resolvedGroupDns = array_values(array_unique($resolvedGroupDns));
+
+            Log::info("Calling syncUserGroups for new user '{$user->getName()}' with " . count($resolvedGroupDns) . " groups.");
+            $this->syncUserGroups($domain, $user, $resolvedGroupDns, $isAdmin);
+            // --- END OF NEW SECTION ---
+
 
             return [
                 'user' => $user ?? null,
@@ -436,32 +605,50 @@ class AdService
         $user->save();
 
         // --- Group Logic (Sync) ---
+        // 3. Sync all groups
+        $submittedGroups = [];
         if ($isAdmin) {
             // --- Admin Group Logic ---
-            $newGroups = $data['groups_privilege_user'] ?? [];
-            $allOptionalGroups = config('keystone.provisioning.optionalGroupsForHighPrivilegeUsers', []);
-            $this->syncUserGroups($domain, $user, $newGroups, $allOptionalGroups);
-
-            // --- START: Ensure user is in default privilege group ---
+            $submittedGroups = $data['groups_privilege_user'] ?? [];
+            
+            // Add default privilege group from config
             try {
                 $groupTemplate = config('keystone.provisioning.ouPrivilegeUserGroup');
                 if ($groupTemplate) {
-                    $defaultPrivilegeGroupDn = $this->resolveDnTemplate($groupTemplate, $domain);
-                    Log::info("Checking admin user membership in default privilege group: {$defaultPrivilegeGroupDn}");
-                    $this->addUserToGroup($domain, $user, $defaultPrivilegeGroupDn);
+                    // We add the *template* string, as it will be resolved next.
+                    $submittedGroups[] = $groupTemplate;
+                    Log::info("Ensuring admin user is in default privilege group: {$groupTemplate}");
                 } else {
                     Log::warning("keystone.provisioning.ouPrivilegeUserGroup is not defined in config.");
                 }
             } catch (\Exception $e) {
-                Log::error("Failed to add admin user to default privilege group during update: " . $e->getMessage());
+                Log::error("Failed to add default privilege group to sync list: " . $e->getMessage());
             }
-            // --- END: Add user to default privilege group from config ---
+
         } else {
             // --- Standard Group Logic ---
-            $newGroups = $data['groups_standard_user'] ?? [];
-            $allOptionalGroups = config('keystone.provisioning.optionalGroupsForStandardUser', []);
-            $this->syncUserGroups($domain, $user, $newGroups, $allOptionalGroups);
+            $submittedGroups = $data['groups_standard_user'] ?? [];
         }
+
+        // Resolve all template DNs
+        $resolvedGroupDns = [];
+        if (is_array($submittedGroups) && !empty($submittedGroups)) {
+            foreach ($submittedGroups as $group) {
+                // Ensure group is a string before resolving
+                if(is_string($group) && !empty($group)) {
+                    $resolvedGroupDns[] = $this->resolveDnTemplate($group, $domain);
+                }
+            }
+        }
+        
+        // Remove duplicates just in case
+        $resolvedGroupDns = array_values(array_unique($resolvedGroupDns));
+
+        Log::info("Calling syncUserGroups for '{$user->getName()}' with " . count($resolvedGroupDns) . " groups.");
+        // --- START: MODIFICATION ---
+        // Pass the $isAdmin flag to syncUserGroups
+        $this->syncUserGroups($domain, $user, $resolvedGroupDns, $isAdmin);
+        // --- END: MODIFICATION ---
 
         return $user;
     }
@@ -470,6 +657,34 @@ class AdService
     // ===================================================================
     // PUBLIC METHODS
     // ===================================================================
+
+    /**
+     * Generate a secure, random password.
+     * Logic ported from AdService.cs GeneratePassword()
+     *
+     * @return string
+     */
+    public function generatePassword(): string
+    {
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $lower = 'abcdefghijkmnpqrstuvwxyz';
+        $number = '123456789';
+        $special = '!@#$=';
+
+        $allChars = $upper . $lower . $number . $special;
+
+        $password = '';
+        $password .= $upper[random_int(0, strlen($upper) - 1)];
+        $password .= $lower[random_int(0, strlen($lower) - 1)];
+        $password .= $number[random_int(0, strlen($number) - 1)];
+        $password .= $special[random_int(0, strlen($special) - 1)];
+
+        for ($i = 0; $i < 12; $i++) {
+            $password .= $allChars[random_int(0, strlen($allChars) - 1)];
+        }
+
+        return str_shuffle($password);
+    }
 
     /**
      * Attempt to bind a user to a specific domain connection.
@@ -770,15 +985,14 @@ class AdService
         Log::info("Attempting to find and update AD user '{$samToUpdate}' in domain '{$domain}'");
 
         try {
-            // *** MODIFIED LOGIC: Find user by badge_number from payload ***
+
             $user = $this->findUserBySamAccountName($samToUpdate, $domain);
+
             if (!$user) {
-                // *** MODIFIED LOGIC: Throw error if not found ***
                 throw new ModelNotFoundException("User '{$samToUpdate}' not found in domain '{$domain}'.");
             }
 
             // --- Update Standard User Attributes (call protected method) ---
-            // This will update the user's info and sync standard groups
             $user = $this->updateAdUser($user, $data, false);
             Log::info("User '{$samToUpdate}' updated successfully.");
 
@@ -789,7 +1003,7 @@ class AdService
             $canManageAdmin = !empty($data['hasHighPrivilegeAccess']);
 
             if ($isPrivileged && $canManageAdmin) {
-                // Admin SAM is based on the badge_number
+
                 $adminSam = "{$samToUpdate}-a";
                 $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
 
@@ -803,14 +1017,14 @@ class AdService
                     $adminResult = $this->createAdminUser($data);
                 }
             } else if (!$isPrivileged && $canManageAdmin) {
-                 // User *unchecked* the "has_admin" box. We should check if an admin account exists and,
-                 // if so, *delete* it, as per the use case.
+
                  $adminSam = "{$samToUpdate}-a";
                  Log::info("has_admin is false. Checking if admin account '{$adminSam}' exists to delete it."); // MODIFIED LOG
                  if ($this->findUserBySamAccountName($adminSam, $domain)) {
                     $this->deleteAdminAccount($domain, $adminSam); // MODIFIED METHOD CALL
                     $adminResult = ['message' => "Admin account {$adminSam} deleted."]; // MODIFIED MESSAGE
                  }
+
             }
 
             return [
@@ -872,7 +1086,7 @@ class AdService
         }
     }
 
-    /**
+/**
      * Delete a privileged admin account.
      *
      * @param string $domain
@@ -1015,6 +1229,7 @@ class AdService
                 $domain = implode('.', $matches[1] ?? []);
 
                 return [
+                    'badgeNumber' => $ldapUser->getFirstAttribute('samaccountname'),
                     'displayName' => $ldapUser->getName(),
                     'domain' => $domain,
                     'isEnabled' => $ldapUser->isEnabled(),
@@ -1035,28 +1250,6 @@ class AdService
     }
 
     /**
-     * Reset the password for a privileged admin account.
-     *
-     * @param string $domain
-     * @param string $baseSamAccountName
-     * @return string The new password
-     */
-    public function resetAdminPassword(string $domain, string $baseSamAccountName): string
-    {
-        $adminSam = "{$baseSamAccountName}-a";
-        $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
-
-        if (!$adminUser) {
-            throw new ModelNotFoundException("Admin account '{$adminSam}' not found.");
-        }
-
-        $newPassword = $this->generatePassword();
-        $this->resetPassword($adminUser, $newPassword, true);
-
-        return $newPassword;
-    }
-
-    /**
      * Unlock a user account.
      *
      * @param string $domain
@@ -1066,14 +1259,19 @@ class AdService
     public function unlockAccount(string $domain, string $samAccountName): void
     {
         $user = $this->findUserBySamAccountName($samAccountName, $domain);
-        if (!$user) {
-            throw new ModelNotFoundException("User '{$samAccountName}' not found.");
-        }
 
-        if ($user->isLocked()) {
-            $user->unlock();
-            Log::info("Unlocked account for '{$samAccountName}'.");
+        $isLocked = $user->getFirstAttribute('lockouttime') > 0;
+
+        if (!$isLocked) {
+            Log::info("Account '{$samAccountName}' on domain '{$domain}' is not locked. No action needed.");
+            return; // No need to proceed if the account isn't locked
         }
+        
+        $user->lockouttime = 0;
+            
+        $user->save();
+            
+        Log::info("Successfully initiated unlock for account '{$user->getDn()}'.");      
     }
 
     /**

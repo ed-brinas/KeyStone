@@ -499,21 +499,23 @@ class UserController extends Controller
      */
     public function enableAccount(Request $request, string $samaccountname): JsonResponse
     {
+        // --- Authorization ---
         $user = Auth::user();
 
-        // --- Authorization ---
         if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 
         // --- Validation ---
         $validator = Validator::make($request->all(), [
-            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))]
+            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
+            'samAccountName' => ['required', 'string'],
         ]);
+        
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
-        $domain = $validator->validated()['domain'];
+        $data = $validator->validated();
         // --- End Validation ---
 
         try {
@@ -549,19 +551,20 @@ class UserController extends Controller
         // --- Authorization ---
         $user = Auth::user();
 
-        // --- Authorization ---
         if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 
         // --- Validation ---
         $validator = Validator::make($request->all(), [
-            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))]
+            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
+            'samAccountName' => ['required', 'string'],
         ]);
+        
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
-        $domain = $validator->validated()['domain'];
+        $data = $validator->validated();
         // --- End Validation ---
 
         try {
@@ -594,30 +597,35 @@ class UserController extends Controller
      */
     public function unlockAccount(Request $request, string $samaccountname): JsonResponse
     {
+        // --- Authorization ---
         $user = Auth::user();
 
-        // --- Authorization ---
         if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
 
         // --- Validation ---
         $validator = Validator::make($request->all(), [
-            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))]
+            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
+            'samAccountName' => ['required', 'string'],
         ]);
+        
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
-        $domain = $validator->validated()['domain'];
+        $data = $validator->validated();
         // --- End Validation ---
 
         try {
-            $this->adService->unlockAccount($domain, $samaccountname);
-            // Also unlock admin account if it exists and user has rights
-            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($domain, $samaccountname)) {
-                $this->adService->unlockAccount($domain, $samaccountname . '-a');
-            }
+
+            $this->adService->unlockAccount($data['domain'], $data['samAccountName']);
+            
+            #if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $samaccountname)) {
+            #    $this->adService->unlockAccount($data['domain'], $samaccountname . '-a');
+            #}
+            
             return response()->json(['message' => 'Account(s) unlocked.'], 200);
+
         } catch (ModelNotFoundException $e) {
             return response()->json(['message' => 'User not found.'], 404);
         }

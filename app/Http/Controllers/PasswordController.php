@@ -52,17 +52,21 @@ class PasswordController extends Controller
     * @OA\Response(response=401, description="Unauthorized")
     * )
     */
-    public function resetStandardPassword(Request $request): JsonResponse
+    public function resetPassword(Request $request): JsonResponse
     {
         // --- Authorization ---
-        if (!Auth::user()->tokenCan('l2') && !Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {
+        $user = Auth::user();
+
+        if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
             return response()->json(['message' => 'This action is unauthorized.'], 403);
         }
+
         // --- Validation ---
         $validator = Validator::make($request->all(), [
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
             'samAccountName' => ['required', 'string'],
         ]);
+        
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
@@ -70,7 +74,9 @@ class PasswordController extends Controller
         // --- End Validation ---
 
         try {
+
             $user = $this->adService->findUserBySamAccountName($data['samAccountName'], $data['domain']);
+
             if (!$user) {
                 return response()->json(['message' => 'User not found.'], 404);
             }
@@ -80,59 +86,13 @@ class PasswordController extends Controller
 
             return response()->json([
                 'message' => 'Password reset successfully.',
-                'initial_password' => $password
+                'newPassword' => $password
             ]);
+            
         } catch (ModelNotFoundException $e) {
             return response()->json(['message' => 'User not found.'], 404);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to reset password: ' . $e->getMessage()], 500);
-        }
-    }
-
-    /**
-    * @OA\Post(
-    * path="/api/v1/passwords/reset-admin",
-    * summary="Reset a user password as an administrator",
-    * tags={"Password Management"},
-    * security={{"bearerAuth": {}}},
-    * @OA\RequestBody(
-    * required=true,
-    * @OA\JsonContent(ref="#/components/schemas/ResetAdminPasswordRequest")
-    * ),
-    * @OA\Response(response=200, description="Password reset successful"),
-    * @OA\Response(response=400, description="Invalid input or password policy violation"),
-    * @OA\Response(response=401, description="Unauthorized"),
-    * @OA\Response(response=403, description="Forbidden")
-    * )
-    */
-    public function resetAdminPassword(Request $request): JsonResponse
-    {
-        // --- Authorization ---
-        if (!Auth::user()->tokenCan('l3') && !Auth::user()->tokenCan('domain admins')) {
-            return response()->json(['message' => 'This action is unauthorized.'], 403);
-        }
-        // --- Validation ---
-        $validator = Validator::make($request->all(), [
-            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
-            'samAccountName' => ['required', 'string'],
-        ]);
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-        $data = $validator->validated();
-        // --- End Validation ---
-
-        try {
-            $password = $this->adService->resetAdminPassword($data['domain'], $data['samAccountName']);
-
-            return response()->json([
-                'message' => 'Admin password reset successfully.',
-                'initial_password' => $password
-            ]);
-        } catch (ModelNotFoundException $e) {
-            return response()->json(['message' => 'Admin user not found.'], 404);
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Failed to reset admin password: ' . $e->getMessage()], 500);
         }
     }
 }

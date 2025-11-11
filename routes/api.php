@@ -42,6 +42,5 @@ Route::middleware('auth:sanctum')->prefix('v1')->group(function () {
     Route::post('users/{samAccountName}/unlock', [UserController::class, 'unlockAccount']);
 
     // Password Management
-    Route::post('passwords/reset-standard', [PasswordController::class, 'resetStandardPassword']);
-    Route::post('passwords/reset-admin', [PasswordController::class, 'resetAdminPassword']);
+    Route::post('passwords/reset-standard', [PasswordController::class, 'resetPassword']);
 });
