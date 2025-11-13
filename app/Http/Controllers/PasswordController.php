@@ -66,7 +66,7 @@ class PasswordController extends Controller
             'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))],
             'samAccountName' => ['required', 'string'],
         ]);
-        
+
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }

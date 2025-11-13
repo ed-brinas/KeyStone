@@ -519,12 +519,15 @@ class UserController extends Controller
         // --- End Validation ---
 
         try {
-            $this->adService->enableAccount($domain, $samaccountname);
-            // Also enable admin account if it exists and user has rights
-            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($domain, $samaccountname)) {
-                $this->adService->enableAccount($domain, $samaccountname . '-a');
+
+            $this->adService->enableAccount($data['domain'], $samaccountname);
+
+            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $data['samAccountName'])) {
+                $this->adService->setExpiration($data['domain'], $samaccountname,30);
             }
+
             return response()->json(['message' => 'Account(s) enabled.'], 200);
+
         } catch (ModelNotFoundException $e) {
             return response()->json(['message' => 'User not found.'], 404);
         }
@@ -568,11 +571,8 @@ class UserController extends Controller
         // --- End Validation ---
 
         try {
-            $this->adService->disableAccount($domain, $samaccountname);
-            // Also disable admin account if it exists and user has rights
-            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($domain, $samaccountname)) {
-                $this->adService->disableAccount($domain, $samaccountname . '-a');
-            }
+            $this->adService->disableAccount($data['domain'], $samaccountname);
+            
             return response()->json(['message' => 'Account(s) disabled.'], 200);
         } catch (ModelNotFoundException $e) {
             return response()->json(['message' => 'User not found.'], 404);
@@ -618,12 +618,12 @@ class UserController extends Controller
 
         try {
 
-            $this->adService->unlockAccount($data['domain'], $data['samAccountName']);
+            $this->adService->unlockAccount($data['domain'], $samaccountname);
             
-            #if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $samaccountname)) {
-            #    $this->adService->unlockAccount($data['domain'], $samaccountname . '-a');
-            #}
-            
+            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $data['samAccountName'])) {
+                $this->adService->setExpiration($data['domain'], $samaccountname,30);
+            }
+                        
             return response()->json(['message' => 'Account(s) unlocked.'], 200);
 
         } catch (ModelNotFoundException $e) {

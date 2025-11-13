@@ -8,6 +8,7 @@
     <div id="login-page" class="screen">
         <div class="login-box text-center shadow-sm">
             <h1 class="h3 mb-3 fw-normal">Active Directory Management</h1>
+            <div id="login-error" class="alert alert-danger mt-3 d-none" role="alert"></div>
             <div class="alert alert-warning text-start small mb-4">
                 <strong>Notice:</strong> Access to this system is restricted to authorized administrators.
             </div>
@@ -26,7 +27,7 @@
                     <input type="password" class="form-control" id="login-password" required>
                 </div>
                 <button type="submit" class="w-100 btn btn-lg btn-primary">Login</button>
-                <div id="login-error" class="alert alert-danger mt-3 d-none" role="alert"></div>
+                
             </form>
         </div>
     </div>

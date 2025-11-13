@@ -97,27 +97,10 @@ class AdService
                 ->first();
 
             if ($group) {
-                // --- FIX APPLIED ---
-                // Removed the "if (!$user->groups()->exists($group))" check
-                // as it was failing due to AD replication lag.
-                // We will just attach the user directly. AD will ignore
-                // the request if the user is already a member.
-
                 $group->members()->attach($user);
                 Log::info("Attached '{$user->getName()}' to group '{$groupName}'. (If not already a member).");
                 return true;
                 
-                /* --- REMOVED BLOCK ---
-                // Check if user is already a member to avoid unnecessary operations
-                if (!$user->groups()->exists($group)) {
-                    // $group->members()->attach($user); // This line was previously commented out, uncommenting it.
-                    $group->members()->attach($user);
-                    Log::info("Added '{$user->getName()}' to group '{$groupName}'.");
-                } else {
-                    Log::info("'{$user->getName()}' is already a member of group '{$groupName}'.");
-                }
-                return true;
-                */
             }
 
             Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
@@ -148,25 +131,11 @@ class AdService
                 ->first();
 
             if ($group) {
-                // --- FIX APPLIED ---
-                // Removed the "if ($user->groups()->exists($group))" check
-                // as it was failing due to AD replication lag.
-                // We will just detach the user directly. AD will ignore
-                // the request if the user is already not a member.
 
                 $group->members()->detach($user);
                 Log::info("Detached '{$user->getName()}' from group '{$groupName}'. (If they were a member).");
                 return true;
-                
-                /* --- REMOVED BLOCK ---
-                if ($user->groups()->exists($group)) {
-                    $group->members()->detach($user);
-                    Log::info("Removed '{$user->getName()}' from group '{$groupName}'.");
-                } else {
-                    Log::info("'{$user->getName()}' is not a member of group '{$groupName}'.");
-                }
-                return true;
-                */
+                 
             }
             Log::warning("Group '{$groupName}' not found in domain '{$domain}'.");
         } catch (\Exception $e) {
@@ -325,7 +294,6 @@ class AdService
     {
         try {
             // 1. Find the Group
-            // ******************* FIX APPLIED HERE (Line 258) *******************
             // Explicitly select 'primaryGroupToken' as it's a constructed attribute
             // and may not be loaded by default.
             $group = LdapGroup::on($domain)
@@ -347,11 +315,7 @@ class AdService
             }
 
             // 3. Reload the group object explicitly with the 'primaryGroupToken'
-            // to ensure it is fetched, as it is a constructed attribute.
-            
-            // ******************* FIX APPLIED HERE (Line 272) *******************
-            // $group->refresh(['primaryGroupToken']); // REMOVED - This is now redundant and was not working as expected.
-            
+            // to ensure it is fetched, as it is a constructed attribute.            
             $primaryGroupToken = $group->getFirstAttribute('primaryGroupToken');
 
             if (!$primaryGroupToken) {
@@ -363,24 +327,9 @@ class AdService
             $user->primaryGroupID = $primaryGroupToken;
 
             // 5. Save the user object to commit the change to Active Directory
-            // ******************* FIX APPLIED HERE (Lines 284-290) *******************
-            // The $user->save() method can return false if it detects a replication
-            // delay, even if the LDAP operation was successful (as seen in logs).
-            // We will trust the operation to throw an exception on a *true* failure
-            // and log success immediately after the save call.
             $user->save();
             Log::info("Successfully set primary group for '{$user->getName()}' to '{$targetGroupDn}'.");
             return true;
-            
-            /* --- REMOVED THIS BLOCK ---
-            if ($user->save()) {
-                Log::info("Successfully set primary group for '{$user->getName()}' to '{$targetGroupDn}'.");
-                return true;
-            }
-            
-            Log::error("setAsPrimaryGroup: Failed to save user '{$user->getName()}' after setting primaryGroupID.");
-            return false;
-            */
 
         } catch (LdapRecordException $e) {
             Log::error("Active Directory Primary Group Update Failed '{$user->getName()}': " . $e->getMessage());
@@ -451,7 +400,7 @@ class AdService
      */
     protected function provisionAdUser(array $data, bool $isAdmin = false): array
     {
-        Log::debug('User provisioning data:', array_merge($data, ['isAdmin' => $isAdmin]));
+        Log::info('User provisioning data:', array_merge($data, ['isAdmin' => $isAdmin]));
 
         $domain     = $data['domain'];
         $firstName  = Str::title($data['first_name']);
@@ -926,9 +875,26 @@ class AdService
                 $user->setAttribute('pwdLastSet', -1); // Do not expire
             }
 
-            $user->save();
+            // 2. Unlock Account (logic from unlockAccount)
+            $user->setAttribute('lockouttime', 0);
 
-            Log::info("Password reset for user: {$user->getFirstAttribute('samaccountname')}");
+            // 3. Enable Account (logic from enableAccount)
+            $currentValue = (int)$user->getFirstAttribute('useraccountcontrol');
+            $accountDisableFlag = 2; // ACCOUNTDISABLE flag
+
+            // Check if the account is currently disabled
+            if ($currentValue & $accountDisableFlag) {
+                // To enable, we use a bitwise AND with the INVERSE of the flag
+                $user->useraccountcontrol = $currentValue & ~$accountDisableFlag;
+            }
+
+            // 4. Save all changes         
+            try {
+                $user->save();
+                Log::info("Password reset, unlocked, and enabled user: {$user->getFirstAttribute('samaccountname')}");
+            } catch (\Exception $e) {
+                Log::error("Failed to Password reset, unlocked, and enabled user: {$user->getFirstAttribute('samaccountname')} " . $e->getMessage());
+            }
 
         } catch (\Exception $e) {
 
@@ -1267,10 +1233,12 @@ class AdService
             return; // No need to proceed if the account isn't locked
         }
         
-        $user->lockouttime = 0;
-            
-        $user->save();
-            
+        try {
+            $user->update(['lockouttime' => 0]); 
+            Log::info("Disabled account for '{$samAccountName}'.");
+        } catch (\Exception $e) {
+            Log::error("Failed to save user '{$samAccountName}' after disabling account: " . $e->getMessage());
+        }           
         Log::info("Successfully initiated unlock for account '{$user->getDn()}'.");      
     }
 
@@ -1288,9 +1256,29 @@ class AdService
             throw new ModelNotFoundException("User '{$samAccountName}' not found.");
         }
 
-        if ($user->isEnabled()) {
-            $user->disable();
-            Log::info("Disabled account for '{$samAccountName}'.");
+        // We get the current value
+        $currentValue = (int)$user->getFirstAttribute('useraccountcontrol');
+
+        // Define the 'ACCOUNTDISABLE' flag (value of 2)
+        $accountDisableFlag = 2;
+
+        // Check if the flag is NOT set (i.e., if the account is currently enabled)
+        if (!($currentValue & $accountDisableFlag)) {
+
+            // To disable, we use a bitwise OR to ADD the flag
+            // This adds '2' to the value (e.g., 512 becomes 514)
+            $user->useraccountcontrol = $currentValue | $accountDisableFlag;
+
+            // We trust the save() operation, same as the unlockAccount fix
+            try {
+                $user->save();
+                Log::info("Disabled account for '{$samAccountName}'.");
+            } catch (\Exception $e) {
+                Log::error("Failed to save user '{$samAccountName}' after disabling account: " . $e->getMessage());
+            }
+
+        } else {
+            Log::info("Account '{$samAccountName}' is already disabled.");
         }
     }
 
@@ -1304,15 +1292,68 @@ class AdService
     public function enableAccount(string $domain, string $samAccountName): void
     {
         $user = $this->findUserBySamAccountName($samAccountName, $domain);
+
         if (!$user) {
             throw new ModelNotFoundException("User '{$samAccountName}' not found.");
         }
 
-        if ($user->isDisabled()) {
-            $user->enable();
-            Log::info("Enabled account for '{$samAccountName}'.");
+        // We get the current value
+        $currentValue = (int)$user->getFirstAttribute('useraccountcontrol');
+        
+        // Define the 'ACCOUNTDISABLE' flag
+        $accountDisableFlag = 2;
+
+        // Check if the flag is actually set (i.e., if the account is disabled)
+        if ($currentValue & $accountDisableFlag) {
+            
+            // To enable, we use a bitwise AND with the INVERSE of the flag
+            // This removes the '2' from the value (e.g., 514 becomes 512)
+            $user->useraccountcontrol = $currentValue & ~$accountDisableFlag;
+            
+            // We trust the save() operation, same as the unlockAccount fix
+            try {
+                $user->save();
+                Log::info("Enabled account for '{$samAccountName}'.");
+            } catch (\Exception $e) {
+                Log::error("Failed to save user '{$samAccountName}' after enabling account: " . $e->getMessage());
+            }
+
+        } else {
+            Log::info("Account '{$samAccountName}' is already enabled.");
         }
     }
 
+    /**
+     * Set a user's account expiration date to 30 days from now.
+     *
+     * @param string $domain
+     * @param string $samAccountName
+     * @return void
+     * @throws ModelNotFoundException
+     * @throws \Exception
+     */
+    public function setExpiration(string $domain, string $samAccountName, int $days): void
+    {
+        Log::info("Attempting to set expiration for '{$samAccountName}' on domain '{$domain}'.");
 
+        $user = $this->findUserBySamAccountName($samAccountName, $domain);
+        
+        if (!$user) {
+            throw new ModelNotFoundException("User '{$samAccountName}' not found.");
+        }
+
+        try {
+            // Set expiration to 30 days from now.
+            $expiresDate = Carbon::now()->addDays($days)->toDateString();
+            $user->accountExpires = $this->convertDateToAdTimestamp($expiresDate);
+            
+            $user->save();
+            
+            Log::info("Successfully set account '{$samAccountName}' to expire on {$expiresDate}.");
+        
+        } catch (\Exception $e) {
+            Log::error("Failed to set expiration for user '{$samAccountName}': " . $e->getMessage());
+            throw new \Exception("Failed to set expiration: " . $e->getMessage());
+        }
+    }
 }
