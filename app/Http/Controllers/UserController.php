@@ -42,19 +42,6 @@ class UserController extends Controller
         ]);
     }   
 
-    /**
-     * @OA\Get(
-     * path="/api/v1/users",
-     * summary="List AD users by domain",
-     * tags={"Users"},
-     * security={{"sanctum": {}}},
-     * @OA\Parameter(name="domain", in="query", required=true, description="Domain name to filter users (e.g. ncc.lab)", @OA\Schema(type="string", example="ncc.lab")),
-     * @OA\Parameter(name="name", in="query", required=false, description="Filter by display name contains", @OA\Schema(type="string", example="John")),
-     * @OA\Response(response=200, description="List of users"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
     public function index(Request $request): JsonResponse
     {
         // --- Authorization ---
@@ -87,84 +74,40 @@ class UserController extends Controller
         return response()->json($users);
     }
 
-/**
-    * @OA\Post(
-    * path="/api/v1/users",
-    * summary="Create a new Active Directory user",
-    * description="Creates a new user in the specified domain.
-    * - User managers can create standard users (saved under provisioning->ouStandardUser).
-    * - Admin managers can also create admin users (username ends with -a, saved under provisioning->ouPrivilegeUser).
-    * - Optional groups can be assigned from configuration lists.
-    * ",
-    * tags={"Users"},
-    *
-    * @OA\RequestBody(
-    * required=true,
-    * @OA\JsonContent(
-    * required={
-    * "domain", "badge_number", "first_name", "last_name",
-    * "mobile_number", "date_of_birth", "badge_expiration_date"
-    * },
-    * @OA\Property(property="domain", type="string", example="corp.example.com"),
-    * @OA\Property(property="badge_number", type="string", example="987654"),
-    * @OA\Property(property="first_name", type="string", example="Jane"),
-    * @OA\Property(property="last_name", type="string", example="Smith"),
-    * @OA\Property(property="mobile_number", type="string", example="+15559876543"),
-    * @OA\Property(property="date_of_birth", type="string", format="date", example="1990-01-25"),
-    * @OA\Property(property="badge_expiration_date", type="string", format="date", example="2026-12-31"),
-    * @OA\Property(property="has_admin", type="boolean", example=false),
-    * @OA\Property(
-    * property="groups_standard_user",
-    * type="array",
-    * @OA\Items(type="string", example="CN=Finance-Users,OU=Groups,DC=corp,DC=example,DC=com")
-    * ),
-    * @OA\Property(
-    * property="groups_privilege_user",
-    * type="array",
-    * @OA\Items(type="string", example="CN=Domain-Admins,OU=Groups,DC=corp,DC=example,DC=com")
-    * )
-    * )
-    * ),
-    *
-    * @OA\Response(
-    * response=201,
-    * description="User created successfully",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="User created successfully."),
-    * @OA\Property(property="username", type="string", example="jsmith"),
-    * @OA\Property(property="initial_password", type="string", example="TempP@ss123!"),
-    * @OA\Property(property="admin_account_username", type="string", example="jsmith-admin"),
-    * @OA\Property(property="admin_initial_password", type="string", example="Adm1nP@ss!")
-    * )
-    * ),
-    *
-    * @OA\Response(
-    * response=403,
-    * description="Unauthorized action or insufficient privileges",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="Unauthorized to create admin accounts.")
-    * )
-    * ),
-    *
-    * @OA\Response(
-    * response=422,
-    * description="Validation failed",
-    * @OA\JsonContent(
-    * @OA\Property(property="errors", type="object", example={"mobile_number": {"The mobile_number field is required."}})
-    * )
-    * ),
-    *
-    * @OA\Response(
-    * response=500,
-    * description="Server error",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="Failed to create user: LDAP connection failed")
-    * )
-    * ),
-    *
-    * security={{"bearerAuth": {}}}
-    * )
-    */
+    public function show(Request $request, string $samaccountname): JsonResponse
+    {
+        $user = Auth::user();
+
+        // --- Authorization ---
+        if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
+            return response()->json(['message' => 'This action is unauthorized.'], 403);
+        }
+
+        // --- Validation ---
+        $validator = Validator::make($request->query(), [
+            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))]
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+        $domain = $validator->validated()['domain'];
+        // --- End Validation ---
+
+        $userDetails = $this->adService->getUserDetails($domain, $samaccountname);
+
+        if (!$userDetails) {
+            // Check if it's an admin account
+            $adminSam = $samaccountname . (str_ends_with($samaccountname, '-a') ? '' : '-a');
+            $userDetails = $this->adService->getUserDetails($domain, $adminSam);
+
+            if(!$userDetails) {
+                return response()->json(['message' => 'User not found.'], 404);
+            }
+        }
+
+        return response()->json($userDetails);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $user = Auth::user();
@@ -258,86 +201,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-    * @OA\Put(
-    * path="/api/v1/users/{samaccountname}",
-    * summary="Update user details",
-    * tags={"Users"},
-    *
-    * @OA\Parameter(
-    * name="samaccountname",
-    * in="path",
-    * required=true,
-    * description="The user's CURRENT SAM account name (AD username). This parameter is part of the URL but the service logic will use 'badge_number' from the payload as the primary key.",
-    * @OA\Schema(type="string", example="118155")
-    * ),
-    *
-    * @OA\RequestBody(
-    * required=true,
-    * @OA\JsonContent(
-    * required={
-    * "domain", "badge_number", "first_name", "last_name",
-    * "mobile_number", "date_of_birth", "date_of_expiry"
-    * },
-    * @OA\Property(property="domain", type="string", example="ncc.lab"),
-    * @OA\Property(property="badge_number", type="string", example="123756391", description="The SAM account name of the user to update. This is the primary key for the update operation."),
-    * @OA\Property(property="first_name", type="string", example="Jane"),
-    * @OA\Property(property="last_name", type="string", example="Doe"),
-    * @OA\Property(property="mobile_number", type="string", example="0556984261"),
-    * @OA\Property(property="date_of_birth", type="string", format="date", example="1984-01-25"),
-    * @OA\Property(property="date_of_expiry", type="string", format="date", example="2027-12-31"),
-    * @OA\Property(property="has_admin", type="boolean", example=false, description="Set to true to create or update the associated admin account"),
-    * @OA\Property(
-    * property="groups_standard_user",
-    * type="array",
-    * @OA\Items(type="string", example="CN=RDP-EMS,CN=Users,DC=ncc,DC=lab")
-    * ),
-    * @OA\Property(
-    * property="groups_privilege_user",
-    * type="array",
-    * @OA\Items(type="string", example="CN=L3,CN=Users,dc=ncc,dc=lab")
-    * )
-    * )
-    * ),
-    *
-    * @OA\Response(
-    * response=200,
-    * description="User updated successfully",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="User updated successfully.")
-    * )
-    * ),
-    * @OA\Response(
-    * response=403,
-    * description="Unauthorized action",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="This action is unauthorized.")
-    * )
-    * ),
-    * @OA\Response(
-    * response=404,
-    * description="User not found",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="User '123756391' not found in domain 'ncc.lab'.")
-    * )
-    * ),
-    * @OA\Response(
-    * response=422,
-    * description="Validation failed",
-    * @OA\JsonContent(
-    * @OA\Property(property="errors", type="object", example={"badge_number": {"The badge_number field is required."}})
-    * )
-    * ),
-    * @OA\Response(
-    * response=500,
-    * description="Server error",
-    * @OA\JsonContent(
-    * @OA\Property(property="message", type="string", example="Failed to update user: Unexpected error")
-    * )
-    * ),
-    * security={{"bearerAuth": {}}}
-    * )
-    */
     public function update(Request $request, string $samaccountname): JsonResponse
     {
         // Use $authUser to avoid conflict with $user variable from service
@@ -434,69 +297,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * @OA\Get(
-     * path="/api/v1/users/{samaccountname}",
-     * summary="Get a single user by samAccountName",
-     * tags={"Users"},
-     * security={{"sanctum": {}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string", example="jdoe")),
-     * @OA\Parameter(name="domain", in="query", required=true, @OA\Schema(type="string", example="ncc.lab")),
-     * @OA\Response(response=200, description="User details"),
-     * @OA\Response(response=404, description="User not found"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
-    public function show(Request $request, string $samaccountname): JsonResponse
-    {
-        $user = Auth::user();
-
-        // --- Authorization ---
-        if (!$user->hasGeneralAccess && !$user->hasHighPrivilegeAccess) {
-            return response()->json(['message' => 'This action is unauthorized.'], 403);
-        }
-
-        // --- Validation ---
-        $validator = Validator::make($request->query(), [
-            'domain' => ['required', 'string', Rule::in(config('keystone.adSettings.domains', []))]
-        ]);
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-        $domain = $validator->validated()['domain'];
-        // --- End Validation ---
-
-        $userDetails = $this->adService->getUserDetails($domain, $samaccountname);
-
-        if (!$userDetails) {
-            // Check if it's an admin account
-            $adminSam = $samaccountname . (str_ends_with($samaccountname, '-a') ? '' : '-a');
-            $userDetails = $this->adService->getUserDetails($domain, $adminSam);
-
-            if(!$userDetails) {
-                return response()->json(['message' => 'User not found.'], 404);
-            }
-        }
-
-        return response()->json($userDetails);
-    }
-
-    /**
-     * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/enable",
-     * summary="Enable a user account",
-     * tags={"Users"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(required=true,
-     * @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
-     * ),
-    * @OA\Response(response=200, description="Account enabled"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
     public function enableAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
@@ -522,8 +322,8 @@ class UserController extends Controller
 
             $this->adService->enableAccount($data['domain'], $samaccountname);
 
-            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $data['samAccountName'])) {
-                $this->adService->setExpiration($data['domain'], $samaccountname,30);
+            if ($user->hasHighPrivilegeAccess && $this->adService->findUserBySamAccountName($samaccountname.'-a',$data['domain'])) {
+                $this->adService->setExpiration($data['domain'], $samaccountname.'-a',30);
             }
 
             return response()->json(['message' => 'Account(s) enabled.'], 200);
@@ -533,22 +333,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/disable",
-     * summary="Disable a user account",
-     * tags={"Users"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(required=true,
-     * @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
-     * ),
-     * @OA\Response(response=200, description="Account disabled"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
     public function disableAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
@@ -572,6 +356,11 @@ class UserController extends Controller
 
         try {
             $this->adService->disableAccount($data['domain'], $samaccountname);
+
+            if ($user->hasHighPrivilegeAccess && $this->adService->findUserBySamAccountName($samaccountname.'-a',$data['domain'])) {
+                $this->adService->disableAccount($data['domain'], $samaccountname.'-a');
+            }
+            
             
             return response()->json(['message' => 'Account(s) disabled.'], 200);
         } catch (ModelNotFoundException $e) {
@@ -579,22 +368,6 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * @OA\Patch(
-     * path="/api/v1/users/{samaccountname}/unlock",
-     * summary="Unlock a user account",
-     * tags={"Users"},
-     * security={{"sanctum":{}}},
-     * @OA\Parameter(name="samaccountname", in="path", required=true, @OA\Schema(type="string")),
-     * @OA\RequestBody(required=true,
-     * @OA\JsonContent(required={"domain"}, @OA\Property(property="domain", type="string", example="ncc.lab"))
-     * ),
-     * @OA\Response(response=200, description="Account unlocked"),
-     * @OA\Response(response=403, description="Unauthorized"),
-     * @OA\Response(response=404, description="User not found"),
-     * @OA\Response(response=422, description="Validation error")
-     * )
-     */
     public function unlockAccount(Request $request, string $samaccountname): JsonResponse
     {
         // --- Authorization ---
@@ -620,8 +393,8 @@ class UserController extends Controller
 
             $this->adService->unlockAccount($data['domain'], $samaccountname);
             
-            if ($user->hasHighPrivilegeAccess && $this->adService->checkIfAdminAccountExists($data['domain'], $data['samAccountName'])) {
-                $this->adService->setExpiration($data['domain'], $samaccountname,30);
+            if ($user->hasHighPrivilegeAccess && $this->adService->findUserBySamAccountName($samaccountname.'-a',$data['domain'])) {
+                $this->adService->setExpiration($data['domain'].'-a', $samaccountname,30);
             }
                         
             return response()->json(['message' => 'Account(s) unlocked.'], 200);

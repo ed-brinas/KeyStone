@@ -430,7 +430,7 @@ class AdService
             $user->displayname          = $cn;
             $user->givenname            = $firstName;
             $user->sn                   = $lastName;
-            $user->useraccountcontrol   = 544; // Enabled, password change required
+            $user->useraccountcontrol   = 544;
             $user->accountExpires       = $expires;
 
             // --- Standard-User-Only Attributes ---
@@ -448,6 +448,7 @@ class AdService
             // Reload the user entry before resetting its password to ensure replication completion:
             sleep(1);
             $user->refresh();
+            $user->update(['pwdlastset' => -1]);
 
             // 2. Generate password
             $initialPassword = $this->generatePassword();
@@ -594,14 +595,75 @@ class AdService
         $resolvedGroupDns = array_values(array_unique($resolvedGroupDns));
 
         Log::info("Calling syncUserGroups for '{$user->getName()}' with " . count($resolvedGroupDns) . " groups.");
-        // --- START: MODIFICATION ---
+
         // Pass the $isAdmin flag to syncUserGroups
         $this->syncUserGroups($domain, $user, $resolvedGroupDns, $isAdmin);
-        // --- END: MODIFICATION ---
 
         return $user;
     }
 
+      /**
+     * Checks the status of an Active Directory account, returning true if it is enabled.
+     *
+     * @param string $domain The LDAP connection name (domain) to search on.
+     * @param string $samAccountName The sAMAccountName of the user.
+     * @return bool True if the account is found and is enabled (not disabled or locked), false otherwise.
+     */
+    protected function checkAccountStatus(string $domain, string $samAccountName): bool
+    {
+        Log::info("Checking AD account status for '{$samAccountName}' on domain '{$domain}'.");
+
+        // Use LdapUser to search for the user by sAMAccountName on the specified connection ($domain)
+        $user = LdapUser::on($domain)
+            ->where('samaccountname', '=', $samAccountName)
+            ->first();
+
+        // Account not found, disabled, or locked out means the status check fails (returns false).
+        if (!$user) {
+            Log::warning("Account '{$samAccountName}' not found.");
+            return false;
+        }
+
+        if ($user->isDisabled()) {
+            Log::warning("Account '{$samAccountName}' is disabled.");
+            return false;
+        }
+
+        if ((int) $user->getAttribute('lockouttime') > 0) {
+            Log::warning("Account '{$samAccountName}' is locked out (lockouttime > 0).");
+            return false;
+        }
+
+        // If the account is found, not disabled, and not locked, it is enabled.
+        Log::info("Account '{$samAccountName}' is enabled.");
+        return true;
+    }  
+
+    /**
+     * Checks if an Active Directory account exists based on its sAMAccountName.
+     *
+     * @param string $domain The LDAP connection name (domain) to search on.
+     * @param string $samAccountName The sAMAccountName of the user.
+     * @return bool True if the account is found, false otherwise.
+     */
+    public function checkAccountExists(string $domain, string $samAccountName): bool
+    {
+        Log::info("Checking if AD account '{$samAccountName}' exists on domain '{$domain}'.");
+
+        $user = LdapUser::on($domain)
+            ->where('samaccountname', '=', $samAccountName)
+            ->first();
+
+        $exists = $user !== null;
+
+        if ($exists) {
+            Log::info("Account '{$samAccountName}' exists.");
+        } else {
+            Log::info("Account '{$samAccountName}' does not exist.");
+        }
+
+        return $exists;
+    }
 
     // ===================================================================
     // PUBLIC METHODS
@@ -687,7 +749,9 @@ class AdService
     public function findUserBySamAccountName(string $username, string $domain): ?LdapUser
     {
         Log::info("Attempting to find user by sAMAccountName: {$username}");
+
         try {
+
             $query = $this->newQuery($domain);
             $user = $query->where('samaccountname', '=', $username)->first();
 
@@ -706,19 +770,6 @@ class AdService
             Log::error("Error finding user '{$username}' on domain '{$domain}': " . $e->getMessage());
             return null;
         }
-    }
-
-    /**
-     * Check if an admin account exists for a given base sAMAccountName.
-     *
-     * @param string $domain
-     * @param string $baseSamAccountName
-     * @return bool
-     */
-    public function checkIfAdminAccountExists(string $domain, string $baseSamAccountName): bool
-    {
-        $adminSam = "{$baseSamAccountName}-a";
-        return $this->findUserBySamAccountName($adminSam, $domain) !== null;
     }
 
     /**
@@ -987,7 +1038,7 @@ class AdService
                  $adminSam = "{$samToUpdate}-a";
                  Log::info("has_admin is false. Checking if admin account '{$adminSam}' exists to delete it."); // MODIFIED LOG
                  if ($this->findUserBySamAccountName($adminSam, $domain)) {
-                    $this->deleteAdminAccount($domain, $adminSam); // MODIFIED METHOD CALL
+                    $this->deleteAccount($domain, $adminSam); // MODIFIED METHOD CALL
                     $adminResult = ['message' => "Admin account {$adminSam} deleted."]; // MODIFIED MESSAGE
                  }
 
@@ -1013,20 +1064,20 @@ class AdService
      * Update an existing privileged (admin) Active Directory user account.
      * (Assumes $data contains snake_case keys from update validation)
      *
-     * @param LdapUser $adminUser The admin user LdapUser object
+     * @param LdapUser $user The admin user LdapUser object
      * @param array $data Validated data from UpdateUserRequest
      * @return LdapUser
      */
-    public function updateAdminUser(LdapUser $adminUser, array $data): array
+    public function updateAdminUser(LdapUser $user, array $data): array
     {
-        $originalAdminSam = $adminUser->samaccountname[0]; // Get from object
+        $originalAdminSam = $user->samaccountname[0];
         Log::info("Updating admin account '{$originalAdminSam}' in domain '{$data['domain']}' via protected method.");
 
         try {
-            // --- Call the new protected method for the admin user ---
-            $adminUser = $this->updateAdUser($adminUser, $data, true);
 
-            return ['user' => $adminUser];
+            $user = $this->updateAdUser($user, $data, true);
+
+            return ['user' => $user];
 
         } catch (\Exception $e) {
             Log::error("Failed to update admin user '{$originalAdminSam}': " . $e->getMessage());
@@ -1035,45 +1086,28 @@ class AdService
     }
 
     /**
-     * Disable a privileged admin account.
+     * Delete a account.
      *
      * @param string $domain
-     * @param string $adminSam
+     * @param string $samAccountName
      * @return void
      */
-    public function disableAdminAccount(string $domain, string $adminSam): void
+    public function deleteAccount(string $domain, string $samAccountName): void
     {
-        Log::info("Disabling admin account '{$adminSam}' in domain '{$domain}'.");
-        $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
-        if ($adminUser) {
-            $this->disableAccount($domain, $adminSam); // Re-use existing disable logic
-        } else {
-            Log::warning("Could not disable admin account '{$adminSam}', user not found.");
-        }
-    }
+        Log::info("Deleting account '{$samAccountName}' in domain '{$domain}'.");
 
-/**
-     * Delete a privileged admin account.
-     *
-     * @param string $domain
-     * @param string $adminSam
-     * @return void
-     */
-    public function deleteAdminAccount(string $domain, string $adminSam): void
-    {
-        Log::info("Deleting admin account '{$adminSam}' in domain '{$domain}'.");
-        $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
-        if ($adminUser) {
+        $user = $this->findUserBySamAccountName($samAccountName, $domain);
+
+        if ($user) {
             try {
-                $adminUser->delete();
-                Log::info("Admin account '{$adminSam}' deleted successfully.");
+                $user->delete();
+                Log::info("Account '{$samAccountName}' deleted successfully.");
             } catch (\Exception $e) {
-                Log::error("Failed to delete admin account '{$adminSam}': " . $e->getMessage());
-                // Re-throw exception to be caught by the controller
+                Log::error("Failed to delete account '{$samAccountName}': " . $e->getMessage());
                 throw $e;
             }
         } else {
-            Log::warning("Could not delete admin account '{$adminSam}', user not found.");
+            Log::warning("Could not delete account '{$samAccountName}', user not found.");
         }
     }
 
@@ -1093,78 +1127,57 @@ class AdService
             return null;
         }
 
-        $dateOfBirth = $user->getFirstAttribute('info');
-        $accountExpiresValue = $user->getFirstAttribute('accountExpires');
-        $accountExpires = 'Never';
-
-        // Check if LdapRecord already gave us a Carbon object
-        if ($accountExpiresValue instanceof \Carbon\Carbon) {
-            // It's a Carbon object. Check if it's a "never" date.
-            // LDAP "never" dates are often far in the future or near epoch '0'.
-            if ($accountExpiresValue->year > 9000 || $accountExpiresValue->timestamp < 1) {
-                $accountExpires = 'Never';
-            } else {
-                $accountExpires = $accountExpiresValue->toDateString();
-            }
-        } 
-        // Check for the raw numeric/string values (the original logic)
-        else if (is_numeric($accountExpiresValue) && $accountExpiresValue > 0 && $accountExpiresValue != '9223372036854775807') {
-            try {
-                // It's a raw Windows FileTime. Convert it.
-                $unixTimestamp = ($accountExpiresValue / 10000000) - 11644473600;
-                $accountExpires = Carbon::createFromTimestamp($unixTimestamp)->toDateString();
-            } catch (\Exception $e) {
-                Log::warning("Could not parse accountExpires timestamp '{$accountExpiresValue}' for user '{$samAccountName}'");
-                $accountExpires = 'Invalid Date';
-            }
-        }
-        // *** END FIX ***
-
-        // --- START: Logic modification for admin groups ---
-
-        // 1. Determine if an admin account exists
-        $hasAdminAccount = str_ends_with($samAccountName, '-a')
-                                ? false // Admin accounts don't have *other* admin accounts
-                                : $this->checkIfAdminAccountExists($domain, $samAccountName);
-
-        // 2. Get the default memberOf from the *standard* user first (Reverted change)
-        $memberOf = $user->groups()->get()->pluck('distinguishedname')->flatten()->filter()->all();
-
-        // 3. (ADJUSTMENT) Add a new key 'memberOfAdmin' if admin account exists
-        $memberOfAdmin = []; // Default to empty array
-        if ($hasAdminAccount) {
-            $adminSam = $samAccountName . '-a';
-            $adminUser = $this->findUserBySamAccountName($adminSam, $domain);
-
-            if ($adminUser) {
-                Log::info("User '{$samAccountName}' has admin account. Fetching groups for '{$adminSam}'.");
-                // Populate the new array with admin groups
-                $memberOfAdmin = $adminUser->groups()->get()->pluck('distinguishedname')->flatten()->filter()->all();
-            } else {
-                // This case is unlikely if $hasAdminAccount is true, but good to handle.
-                Log::warning("User '{$samAccountName}' hasAdminAccount=true, but admin user '{$adminSam}' could not be found to fetch groups.");
-                // $memberOfAdmin remains an empty array
-            }
-        }
-        // --- END: Logic modification for admin groups ---
-
-
         return [
-            'samAccountName' => $user->getFirstAttribute('samaccountname'),
-            'firstName' => $user->getFirstAttribute('givenname'),
-            'lastName' => $user->getFirstAttribute('sn'),
-            'displayName' => $user->getFirstAttribute('displayname'),
-            'userPrincipalName' => $user->getFirstAttribute('userprincipalname'),
-            'emailAddress' => $user->getFirstAttribute('mail'),
-            'dateOfBirth' => $dateOfBirth, // 'info' attribute
-            'mobileNumber' => $user->getFirstAttribute('mobile'),
-            'badgeExpirationDate' => $accountExpires, // Use the new, safer variable
-            'isEnabled' => $user->isEnabled(),
-            'isLockedOut' => ($user->getFirstAttribute('lockouttime') > 0) ? true : false,
-            'memberOf' => $memberOf, // This is now correctly the *standard* user's groups
-            'memberOfAdmin' => $memberOfAdmin, // This new field holds the admin groups
-            'hasAdminAccount' => $hasAdminAccount
+            'domain'            => $domain,
+            'badgeNumber'       => $user->getFirstAttribute('samaccountname'),
+            'displayName'       => $user->getFirstAttribute('displayname'),
+            'samAccountName'    => $user->getFirstAttribute('userprincipalname'),
+            'firstName'         => $user->getFirstAttribute('givenname'),
+            'lastName'          => $user->getFirstAttribute('sn'),
+            'dateOfBirth'       => $user->getFirstAttribute('info') ?? null,
+            'dateOfExpiration'  => Carbon::parse($user->getFirstAttribute('accountexpires'))->format('Y-m-d'),
+            'emailAddress'      => $user->getFirstAttribute('mail') ?? null,
+            'mobileNumber'      => $user->getFirstAttribute('mobile') ?? null,
+            'isEnabled'         => $user->isEnabled(),
+            'isLockedOut'       => ($user->getFirstAttribute('lockouttime') > 0) ? true : false,
+            'memberOf'          => array_map('strtolower',$this->getUserGroups($domain,$user->getFirstAttribute('samaccountname'))),
+            'hasAdminAccount'   => ($this->findUserBySamAccountName($samAccountName.'-a', $domain)) ? true : false,
+            'memberOfAdmin'     => array_map('strtolower',$this->getUserGroups($domain,$user->getFirstAttribute('samaccountname').'-a')),
         ];
+    }
+
+    /**
+     * Retrieves all Active Directory groups that a specific user is a member of.
+     *
+     * @param string $domain The LDAP connection name (domain) to search on.
+     * @param string $samAccountName The sAMAccountName of the user.
+     * @return array An array of group Common Names (CNs). Returns an empty array if the user is not found.
+     */
+    public function getUserGroups(string $domain, string $samAccountName): array
+    {
+        Log::info("Retrieving groups for AD account '{$samAccountName}' on domain '{$domain}'.");
+
+        // 1. Find the user
+        $user = LdapUser::on($domain)
+            ->where('samaccountname', '=', $samAccountName)
+            ->first();
+
+        if (!$user) {
+            Log::warning("User '{$samAccountName}' not found. Cannot retrieve groups.");
+            return [];
+        }
+
+        // 2. Get the user's groups via the LdapRecord relationship
+        // We retrieve the groups and select only the common name ('cn').
+        $ldapGroups = $user->groups()->get(['cn']);
+
+        // 3. Map the LdapRecord collection to an array of group names (CNs)
+        $groups = $ldapGroups->map(fn (LdapGroup $group) => $group->getDn())
+                             ->toArray();
+
+        Log::info("Found " . count($groups) . " groups for user '{$samAccountName}'.");
+
+        return $groups;
     }
 
     /**
@@ -1184,6 +1197,9 @@ class AdService
         $finalUsers = collect();
 
         foreach ($formattedOus as $formattedOu) {
+
+            Log::info('Extracting data from: '.$formattedOu);
+
             $query = LdapUser::in($formattedOu);
             
             if ($nameFilter) {
@@ -1191,17 +1207,18 @@ class AdService
             }
             
             $extractedInfo = $query->get()->map(function ($ldapUser) use ($domainFilter) {
+
                 preg_match_all('/DC=([^,]+)/i', $ldapUser->getDn(), $matches);
                 $domain = implode('.', $matches[1] ?? []);
 
                 return [
-                    'badgeNumber' => $ldapUser->getFirstAttribute('samaccountname'),
-                    'displayName' => $ldapUser->getName(),
-                    'domain' => $domain,
-                    'isEnabled' => $ldapUser->isEnabled(),
-                    'samAccountName' => $ldapUser->getFirstAttribute('userprincipalname'),
-                    'accountExpires' => $this->convertDateToTimestamp($ldapUser->getFirstAttribute('accountexpires')),
-                    'hasAdminAccount' => $this->checkIfAdminAccountExists($domain, $ldapUser->getFirstAttribute('samaccountname'))
+                    'domain'            => $domain,
+                    'badgeNumber'       => $ldapUser->getFirstAttribute('samaccountname'),
+                    'displayName'       => $ldapUser->getName(),
+                    'samAccountName'    => $ldapUser->getFirstAttribute('userprincipalname'),
+                    'dateOfExpiration'  => $this->convertDateToTimestamp($ldapUser->getFirstAttribute('accountexpires')),
+                    'isEnabled'         => $ldapUser->isEnabled(),
+                    'hasAdminAccount'   => ($this->findUserBySamAccountName($ldapUser->getFirstAttribute('samaccountname').'-a', $domain)) ? true : false,
                 ];
             });            
 
@@ -1313,7 +1330,7 @@ class AdService
             // We trust the save() operation, same as the unlockAccount fix
             try {
                 $user->save();
-                Log::info("Enabled account for '{$samAccountName}'.");
+                Log::info("Account successfully Enabled for '{$samAccountName}'.");
             } catch (\Exception $e) {
                 Log::error("Failed to save user '{$samAccountName}' after enabling account: " . $e->getMessage());
             }
@@ -1344,8 +1361,8 @@ class AdService
 
         try {
             // Set expiration to 30 days from now.
-            $expiresDate = Carbon::now()->addDays($days)->toDateString();
-            $user->accountExpires = $this->convertDateToAdTimestamp($expiresDate);
+            $expiresDate = $this->convertDateToAdTimestamp(Carbon::now()->addDays($days)->toDateString());
+            $user->accountExpires = $expiresDate;
             
             $user->save();
             

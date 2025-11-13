@@ -277,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams({ domain });
         if(nameFilter) params.append('nameFilter', nameFilter);
         const requestUrl = `${API_BASE_URL}/v1/users?${params.toString()}`;
-
+console.log(requestUrl);
         try {
             
             const users = await apiFetch(requestUrl);
@@ -292,8 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${user.samAccountName || ''}</td>
                     <td>${user.domain || ''}</td>
                     <td>${user.isEnabled ? '<span class="badge text-success-emphasis bg-success-subtle border border-success-subtle rounded-pill">Enabled</span>' : '<span class="badge text-danger-emphasis bg-danger-subtle border border-danger-subtle rounded-pill">Disabled</span>'}</td>
-                    <td>${user.hasAdminAccount ? '✔️' : ''}</td>
-                    <td>${user.accountExpires}</td>
+                    <td>${user.dateOfExpiration}</td>
+                    <td>${user.hasAdminAccount ? '✔️' : ''}</td>                    
                     <td class="action-btn-group">
                         <button class="btn btn-sm btn-secondary" title="Edit User" data-action="edit" data-sam="${user.badgeNumber}"><i class="bi bi-pencil-square"></i></button>
                         <button class="btn btn-sm btn-warning" title="Reset Password" data-action="reset-pw" data-sam="${user.badgeNumber}"><i class="bi bi-person-lock"></i></button>
@@ -304,10 +304,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                         ${currentUser.isHighPrivilege && user.hasAdminAccount
                             ? ` | <button class="btn btn-sm btn-dark" title="Reset Admin Password" data-action="reset-pw-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-person-lock"></i></button>
-                                <button class="btn btn-sm btn-dark" title="Unlock Admin Account" data-action="unlock-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-unlock"></i></button>
-                                <button class="btn btn-sm btn-dark" title="Enable Admin Account" data-action="enable-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-check2-circle"></i></button>`
+                                <button class="btn btn-sm btn-dark" title="Unlock Admin Account" data-action="unlock-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-unlock"></i></button>`
                             : ''
-                        }                           
+                        } 
+                        ${currentUser.isHighPrivilege && user.isEnabled && user.isAdminEnabled
+                            ? `<button class="btn btn-sm btn-dark" title="Disable Account" data-action="disable" data-sam="${user.badgeNumber}"><i class="bi bi-ban"></i></button>`
+                            : ''
+                        }                                               
                     </td>
                 </tr>
             `).join('');
@@ -421,8 +424,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (form) {
                 form.dataset.originalSam = safeSam;
             }
+            console.log(`${API_BASE_URL}/v1/users/${safeSam}?${params.toString()}`);
 
             const userDetails = await apiFetch(`${API_BASE_URL}/v1/users/${safeSam}?${params.toString()}`);
+            
             
             if (!userDetails) {
                 showAlert(`Could not find details for user '${sam}'.`, 'warning');
@@ -438,15 +443,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const editDomain = document.getElementById('edit-domain');
             
             
-            if (editUsernameDisplay) editUsernameDisplay.value = userDetails.samAccountName;
-            if (editAdminSamAccountName) editAdminSamAccountName.value = userDetails.samAccountName + '-a';
-            if (editSamAccountName) editSamAccountName.value = userDetails.samAccountName;
+            if (editUsernameDisplay) editUsernameDisplay.value = userDetails.badgeNumber;
+            if (editAdminSamAccountName) editAdminSamAccountName.value = userDetails.badgeNumber + '-a';
+            if (editSamAccountName) editSamAccountName.value = userDetails.badgeNumber;
             if (editFirstName) editFirstName.value = userDetails.firstName;
             if (editLastName) editLastName.value = userDetails.lastName;
             if (editDob) editDob.value = formatDateForInput(userDetails.dateOfBirth);
             if (editMobile) editMobile.value = userDetails.mobileNumber;
             if (editDomain) editDomain.value = domain;
-            if (editDoe) editDoe.value = formatDateForInput(userDetails.badgeExpirationDate);
+            if (editDoe) editDoe.value = formatDateForInput(userDetails.dateOfExpiration);
             
             const standardGroupsContainer = document.getElementById('edit-standard-groups-container');
             const standardGroupsList = document.getElementById('edit-standard-groups-list');

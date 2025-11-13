@@ -30,8 +30,8 @@
                                     <th>Username</th>
                                     <th>Domain</th>
                                     <th>Status</th>
-                                    <th>Has Admin?</th>
                                     <th>Expires</th>
+                                    <th>Has Admin?</th>                                    
                                     <th>Actions</th>
                                 </tr>
                             </thead>
