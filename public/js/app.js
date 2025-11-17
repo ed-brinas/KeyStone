@@ -302,15 +302,22 @@ console.log(requestUrl);
                             ? `<button class="btn btn-sm btn-danger" title="Disable Account" data-action="disable" data-sam="${user.badgeNumber}"><i class="bi bi-ban"></i></button>`
                             : `<button class="btn btn-sm btn-success" title="Enable Account" data-action="enable" data-sam="${user.badgeNumber}"><i class="bi bi-check2-square"></i></button>`
                         }
-                        ${currentUser.isHighPrivilege && user.hasAdminAccount
-                            ? ` | <button class="btn btn-sm btn-dark" title="Reset Admin Password" data-action="reset-pw-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-person-lock"></i></button>
-                                <button class="btn btn-sm btn-dark" title="Unlock Admin Account" data-action="unlock-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-unlock"></i></button>`
+                        ${user.isEnabled && currentUser.isHighPrivilege && user.hasAdminAccount
+                            ? ` | 
+                                <button class="btn btn-sm btn-dark" title="Reset Admin Password" data-action="reset-pw-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-person-lock"></i></button>
+                                <button class="btn btn-sm btn-dark" title="Unlock Admin Account" data-action="unlock-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-unlock"></i></button>
+                                `
                             : ''
                         } 
-                        ${currentUser.isHighPrivilege && user.isEnabled && user.isAdminEnabled
-                            ? `<button class="btn btn-sm btn-dark" title="Disable Account" data-action="disable" data-sam="${user.badgeNumber}"><i class="bi bi-ban"></i></button>`
-                            : ''
-                        }                                               
+                        ${user.isEnabled && currentUser.isHighPrivilege && user.hasAdminAccount && user.isEnabledAdmin
+                            ? `<button class="btn btn-sm btn-dark" title="Disable Admin Account" data-action="disable-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-ban"></i></button>`
+                            : ``
+                        }
+                        ${user.isEnabled && currentUser.isHighPrivilege && user.hasAdminAccount && !user.isEnabledAdmin
+                            ? `<button class="btn btn-sm btn-dark" title="Enable Admin Account" data-action="enable-admin" data-sam="${user.badgeNumber}-a"><i class="bi bi-check2-square"></i></button>`
+                            : ``
+                        }                        
+                         
                     </td>
                 </tr>
             `).join('');
@@ -549,7 +556,7 @@ console.log(requestUrl);
                     await apiFetch(`${API_BASE_URL}/v1/users/${sam}/unlock`, { method: 'POST', body });
                     showAlert(`Successfully unlocked account: ${sam}`, 'success');
                     break;
-                case 'disable':
+                case 'disable': case 'disable-admin':
                     await apiFetch(`${API_BASE_URL}/v1/users/${sam}/disable`, { method: 'POST', body });
                     showAlert(`Successfully disabled account: ${sam}`, 'success');
                     break;
@@ -747,6 +754,7 @@ console.log(requestUrl);
                 'unlock': `Are you sure you want to unlock the account for ${sam}?`,
                 'unlock-admin': `Are you sure you want to unlock the account for ${sam}?`,
                 'disable': `Are you sure you want to DISABLE the account for ${sam}?`,
+                'disable-admin': `Are you sure you want to DISABLE the account for ${sam}?`,
                 'enable': `Are you sure you want to ENABLE the account for ${sam}?`,
                 'enable-admin': `Are you sure you want to ENABLE the account for ${sam}?`,
             };

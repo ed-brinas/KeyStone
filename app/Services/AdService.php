@@ -430,7 +430,7 @@ class AdService
             $user->displayname          = $cn;
             $user->givenname            = $firstName;
             $user->sn                   = $lastName;
-            $user->useraccountcontrol   = 544;
+            $user->useraccountcontrol   = 544; // Enabled, password change required
             $user->accountExpires       = $expires;
 
             // --- Standard-User-Only Attributes ---
@@ -448,7 +448,6 @@ class AdService
             // Reload the user entry before resetting its password to ensure replication completion:
             sleep(1);
             $user->refresh();
-            $user->update(['pwdlastset' => -1]);
 
             // 2. Generate password
             $initialPassword = $this->generatePassword();
@@ -496,7 +495,13 @@ class AdService
             $this->syncUserGroups($domain, $user, $resolvedGroupDns, $isAdmin);
             // --- END OF NEW SECTION ---
 
-
+            if ($isAdmin) {
+                Log::info("Removing user must change password at next logon for ".$sam);
+                $admin = LdapUser::where('samaccountname', '=', $sam)->firstOrFail();
+                $admin->pwdlastset = -1;
+                $admin->save();
+            }
+            
             return [
                 'user' => $user ?? null,
                 'initialPassword' => $initialPassword ?? null, // Standardized key
@@ -1219,6 +1224,7 @@ class AdService
                     'dateOfExpiration'  => $this->convertDateToTimestamp($ldapUser->getFirstAttribute('accountexpires')),
                     'isEnabled'         => $ldapUser->isEnabled(),
                     'hasAdminAccount'   => ($this->findUserBySamAccountName($ldapUser->getFirstAttribute('samaccountname').'-a', $domain)) ? true : false,
+                    'isEnabledAdmin'    => $this->checkAccountStatus($domain,$ldapUser->getFirstAttribute('samaccountname').'-a'),
                 ];
             });            
 
